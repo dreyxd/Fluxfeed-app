@@ -1,0 +1,335 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Smooth fonts and dark background fallback */
+html {
+  scroll-behavior: smooth;
+  height: 100%;
+}
+body, #root {
+  height: 100%;
+}
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #09090b; /* zinc-950 */
+  position: relative;
+}
+
+/* Subtle grain texture overlay */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.015;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
+}
+
+/* Radial gradient spotlight effect */
+body::after {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(
+    circle at 50% 20%,
+    rgba(251, 146, 60, 0.03) 0%,
+    rgba(234, 88, 12, 0.02) 30%,
+    transparent 70%
+  );
+}
+
+/* Smooth scroll offset for sticky header */
+section[id] {
+  scroll-margin-top: 80px;
+}
+
+/* Laser ring highlight that sweeps around a rounded border */
+.laser-ring {
+  --angle: 0deg;
+  position: absolute;
+  inset: -2px; /* bleed a bit outside for glow */
+  border-radius: 0.75rem; /* rounded-xl */
+  pointer-events: none;
+  z-index: 1;
+}
+.laser-ring::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 2px; /* border thickness */
+  background: conic-gradient(from var(--angle),
+    rgba(251,146,60,0) 0deg,
+    rgba(251,146,60,0.95) 12deg,
+    rgba(251,146,60,0) 24deg,
+    transparent 360deg);
+  /* Show only the border ring */
+  /* Mask out the inner area so only the border ring is visible */
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  filter: drop-shadow(0 0 6px rgba(251,146,60,0.6));
+  animation: laserSweep 3.2s linear infinite;
+}
+
+@keyframes laserSweep {
+  to { --angle: 360deg; }
+}
+
+/* Orange gravity orbs around the preview card */
+.gravity-orb {
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+  filter: blur(28px);
+  mix-blend-mode: screen;
+}
+.gravity-orb.orb-a {
+  width: 180px;
+  height: 180px;
+  top: -30px;
+  left: -30px;
+  opacity: 0.35;
+  background: radial-gradient(circle at 30% 30%, rgba(251,146,60,0.6), rgba(251,146,60,0) 65%);
+  animation: gravityDriftA 10s ease-in-out infinite alternate;
+}
+.gravity-orb.orb-b {
+  width: 220px;
+  height: 220px;
+  bottom: -40px;
+  right: -20px;
+  opacity: 0.25;
+  background: radial-gradient(circle at 70% 70%, rgba(234,88,12,0.55), rgba(234,88,12,0) 65%);
+  animation: gravityDriftB 12s ease-in-out infinite alternate;
+}
+
+@keyframes gravityDriftA {
+  from { transform: translate(0, 0) scale(1); }
+  to   { transform: translate(8px, -6px) scale(1.03); }
+}
+@keyframes gravityDriftB {
+  from { transform: translate(0, 0) scale(1); }
+  to   { transform: translate(-10px, 8px) scale(1.04); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gravity-orb { animation: none; }
+  .laser-ring::before { animation: none; }
+}
+
+/* Glow pulse for preview card */
+.animate-pulse-glow {
+  animation: pulseGlow 3s ease-in-out infinite;
+}
+
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 20px rgba(251, 146, 60, 0.1); }
+  50% { box-shadow: 0 0 40px rgba(251, 146, 60, 0.3); }
+}
+
+/* Fade in + slide up animation for sections */
+.section-reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.4s cubic-bezier(0.2, 0.8, 0.2, 1),
+              transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.section-reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Stagger children animations */
+.stagger-children > * {
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 0.35s cubic-bezier(0.2, 0.8, 0.2, 1),
+              transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.stagger-children.visible > *:nth-child(1) { transition-delay: 0ms; }
+.stagger-children.visible > *:nth-child(2) { transition-delay: 60ms; }
+.stagger-children.visible > *:nth-child(3) { transition-delay: 120ms; }
+.stagger-children.visible > *:nth-child(4) { transition-delay: 180ms; }
+.stagger-children.visible > *:nth-child(5) { transition-delay: 240ms; }
+.stagger-children.visible > *:nth-child(6) { transition-delay: 300ms; }
+
+.stagger-children.visible > * {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Fade in + slide up animation for items */
+.animate-fade-in {
+  animation: fadeInUp 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  opacity: 0;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Marquee scrolling */
+.animate-marquee {
+  animation: marquee 30s linear infinite;
+}
+
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+/* Scale hover for cards */
+.hover\:scale-102:hover {
+  transform: scale(1.02);
+}
+
+/* Disclosure indicator rotation */
+.transition-transform {
+  transition: transform 200ms ease;
+}
+
+/* Navbar scroll effects */
+.navbar-scrolled {
+  background-color: rgba(9, 9, 11, 0.95);
+  border-bottom-color: rgba(63, 63, 70, 0.5);
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+}
+
+/* Expandable news card animations - smooth expand/collapse */
+.news-card-expanded {
+  max-height: 2000px;
+  opacity: 1;
+  overflow: hidden;
+  transition: max-height 0.6s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1) 0.1s;
+}
+
+.news-card-collapsed {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Smooth slide-in animation for expanded content */
+.animate-slide-in {
+  animation: slideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Trending fire effect */
+.trending-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.75rem;
+  background: linear-gradient(135deg, rgba(234, 88, 12, 0.2), rgba(249, 115, 22, 0.15));
+  border: 1px solid rgba(249, 115, 22, 0.3);
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgb(251, 146, 60);
+}
+
+.fire-icon {
+  animation: flicker 2s ease-in-out infinite;
+}
+
+@keyframes flicker {
+  0%, 100% { 
+    opacity: 1;
+    filter: drop-shadow(0 0 4px rgba(251, 146, 60, 0.6));
+  }
+  50% { 
+    opacity: 0.8;
+    filter: drop-shadow(0 0 8px rgba(251, 146, 60, 0.8));
+  }
+}
+
+/* Sundown digest badge */
+.sundown-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.75rem;
+  background: linear-gradient(135deg, rgba(147, 51, 234, 0.2), rgba(168, 85, 247, 0.15));
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgb(192, 132, 252);
+}
+
+.sunset-icon {
+  animation: pulse-glow-purple 3s ease-in-out infinite;
+}
+
+@keyframes pulse-glow-purple {
+  0%, 100% { 
+    opacity: 1;
+    filter: drop-shadow(0 0 4px rgba(192, 132, 252, 0.6));
+  }
+  50% { 
+    opacity: 0.85;
+    filter: drop-shadow(0 0 6px rgba(192, 132, 252, 0.8));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .section-reveal,
+  .stagger-children > * {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+  .animate-pulse-glow,
+  .animate-fade-in,
+  .animate-marquee,
+  .hover\:scale-102:hover {
+    animation: none;
+    transform: none;
+  }
+  .fire-icon,
+  .sunset-icon {
+    animation: none;
+    filter: none;
+  }
+}

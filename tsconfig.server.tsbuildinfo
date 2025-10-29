@@ -1,0 +1,1 @@
+{"root":["./server/db.ts","./server/index.ts","./server/init-db.ts","./server/middleware/auth.ts","./server/routes/auth.ts","./server/routes/waitlist.ts"],"version":"5.6.3"}

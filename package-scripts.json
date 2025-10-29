@@ -1,0 +1,11 @@
+{
+  "scripts": {
+    "dev": "vite",
+    "dev:all": "concurrently \"npm:server\" \"vite\" \"npm:dev:open\"",
+    "dev:open": "wait-on http://localhost:5173 && powershell -Command start http://localhost:5173/app",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "server": "tsx watch server/index.ts",
+    "init-db": "tsx server/init-db.ts"
+  }
+}
