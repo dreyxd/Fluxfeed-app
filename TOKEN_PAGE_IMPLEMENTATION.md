@@ -73,8 +73,8 @@ Interactive accordion-style FAQ covering:
 - Holding requirements
 - Staking rewards
 
-### Social Links
-- Twitter (placeholder: @fluxfeed)
+-### Social Links
+- X (placeholder: @ndrey011)
 - Discord (placeholder: discord.gg/fluxfeed)
 - Telegram (placeholder: t.me/fluxfeed)
 

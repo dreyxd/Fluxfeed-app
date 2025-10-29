@@ -208,7 +208,7 @@ dist/assets/index.js   268.67 kB (gzip: 74.97 kB)
 ## 📝 Notes
 
 - All external links use `target="_blank"` and `rel="noopener noreferrer"` for security
-- Social links point to `https://x.com/fluxfeed` and `https://t.me/fluxfeed`
+- Social links point to `https://x.com/ndrey011` and `https://t.me/fluxfeed`
 - News API endpoint remains `/api/news/general?items=12`
 - IntersectionObserver threshold set to 0.1 (10% visibility triggers animation)
 - All new pages include consistent navbar and footer
