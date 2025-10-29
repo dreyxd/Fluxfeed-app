@@ -19,6 +19,8 @@ const allowedOrigins = [
   'https://fluxfeed.news',            // Production main
   'https://www.fluxfeed.news',        // Production www
   'https://app.fluxfeed.news',        // Production app subdomain
+  'https://fluxfeed-landing.vercel.app',  // Vercel landing preview
+  'https://fluxfeed-app.vercel.app',      // Vercel app preview
 ]
 
 const app = express()
