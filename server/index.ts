@@ -12,6 +12,48 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || ''
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5-mini'
 const CRYPTONEWS_API_KEY = process.env.CRYPTONEWS_API_KEY || ''
 
+// ----------------------------- Cache System -----------------------------
+interface CacheEntry {
+  data: any
+  timestamp: number
+}
+
+const cache = new Map<string, CacheEntry>()
+const CACHE_TTL = 5 * 60 * 1000 // 5 minutes cache
+
+function getCached(key: string): any | null {
+  const cached = cache.get(key)
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    console.log(`📦 Cache HIT for key: ${key}`)
+    return cached.data
+  }
+  if (cached) {
+    cache.delete(key) // Remove expired cache
+    console.log(`🗑️  Cache EXPIRED for key: ${key}`)
+  }
+  return null
+}
+
+function setCache(key: string, data: any): void {
+  cache.set(key, { data, timestamp: Date.now() })
+  console.log(`💾 Cache SET for key: ${key}`)
+}
+
+// Clean up expired cache entries every 10 minutes
+setInterval(() => {
+  const now = Date.now()
+  let cleaned = 0
+  for (const [key, entry] of cache.entries()) {
+    if (now - entry.timestamp >= CACHE_TTL) {
+      cache.delete(key)
+      cleaned++
+    }
+  }
+  if (cleaned > 0) {
+    console.log(`🧹 Cache cleanup: removed ${cleaned} expired entries`)
+  }
+}, 10 * 60 * 1000)
+
 // Allowed origins for CORS
 const allowedOrigins = [
   'http://localhost:5173',           // Development - App
@@ -173,7 +215,17 @@ function aggregateHeadlineScores(items: Array<{ title: string; publishedAt: stri
 
 async function fetchCryptoNews(tickers: string | string[], sinceMinutes = 1440, opts?: { sentiment?: 'positive'|'negative'|'neutral', items?: number, page?: number }): Promise<NewsItem[]> {
   if (!CRYPTONEWS_API_KEY) return []
+  
+  // Create cache key based on parameters
   const list = Array.isArray(tickers) ? tickers : [tickers]
+  const cacheKey = `crypto-news-${list.join(',')}-${sinceMinutes}-${opts?.sentiment || 'all'}-${opts?.items || 50}-${opts?.page || 1}`
+  
+  // Check cache first
+  const cached = getCached(cacheKey)
+  if (cached) {
+    return cached
+  }
+  
   const url = new URL('https://cryptonews-api.com/api/v1')
   if (list.length === 1) url.searchParams.set('tickers-only', list[0])
   else url.searchParams.set('tickers-include', list.join(','))
@@ -202,7 +254,12 @@ async function fetchCryptoNews(tickers: string | string[], sinceMinutes = 1440, 
     return { id, title, source, url: urlA, publishedAt, tickers: ticks, sentiment, score }
   })
   const cutoff = Date.now() - minutesToMs(sinceMinutes)
-  return mapped.filter(m => new Date(m.publishedAt).getTime() >= cutoff)
+  const filtered = mapped.filter(m => new Date(m.publishedAt).getTime() >= cutoff)
+  
+  // Cache the result
+  setCache(cacheKey, filtered)
+  
+  return filtered
 }
 
 // ----------------------------- OpenAI helper -----------------------------
@@ -547,13 +604,20 @@ app.get('/api/stat/general', async (req: Request, res: Response) => {
   }
 })
 
-// Landing “general” news
+// Landing "general" news
 app.get('/api/news/general', async (req: Request, res: Response) => {
   try {
     if (!CRYPTONEWS_API_KEY) return res.json({ items: [] })
     const totalItems = Math.min(100, Number(req.query.items || 12))
     const itemsPerSentiment = Math.ceil(totalItems / 2)
     const page = Math.max(1, Number(req.query.page || 1))
+    
+    // Check cache first
+    const cacheKey = `general-news-${totalItems}-${page}`
+    const cached = getCached(cacheKey)
+    if (cached) {
+      return res.json(cached)
+    }
     
     // Use the "All Ticker News" endpoint for fetching news across all crypto coins
     const urlPositive = new URL('https://cryptonews-api.com/api/v1/category')
@@ -631,7 +695,12 @@ app.get('/api/news/general', async (req: Request, res: Response) => {
       if (i < labeledNegative.length) mixed.push(labeledNegative[i])
     }
     
-    res.json({ items: mixed })
+    const result = { items: mixed }
+    
+    // Cache the result
+    setCache(cacheKey, result)
+    
+    res.json(result)
   } catch (e: any) {
     res.status(500).json({ error: e?.message || 'general_error' })
   }
@@ -642,6 +711,13 @@ app.get('/api/news/trending', async (req: Request, res: Response) => {
   try {
     if (!CRYPTONEWS_API_KEY) return res.json({ items: [] })
     const page = Math.max(1, Number(req.query.page || 1))
+    
+    // Check cache first
+    const cacheKey = `trending-news-${page}`
+    const cached = getCached(cacheKey)
+    if (cached) {
+      return res.json(cached)
+    }
     
     // Fetch trending headlines without sentiment filter to avoid duplicates
     const url = `https://cryptonews-api.com/api/v1/trending-headlines?page=${page}&token=${CRYPTONEWS_API_KEY}`
@@ -709,7 +785,12 @@ app.get('/api/news/trending', async (req: Request, res: Response) => {
       score: labels[i]?.score ?? 0 
     }))
     
-    res.json({ items: labeled })
+    const result = { items: labeled }
+    
+    // Cache the result
+    setCache(cacheKey, result)
+    
+    res.json(result)
   } catch (e: any) {
     console.error('Trending news error:', e?.message || e)
     res.status(500).json({ error: e?.message || 'trending_error' })
@@ -721,6 +802,14 @@ app.get('/api/news/sundown', async (req: Request, res: Response) => {
   try {
     if (!CRYPTONEWS_API_KEY) return res.json({ items: [] })
     const page = Math.max(1, Number(req.query.page || 1))
+    
+    // Check cache first
+    const cacheKey = `sundown-news-${page}`
+    const cached = getCached(cacheKey)
+    if (cached) {
+      return res.json(cached)
+    }
+    
     const url = `https://cryptonews-api.com/api/v1/sundown-digest?page=${page}&token=${CRYPTONEWS_API_KEY}`
     const resApi = await fetch(url)
     if (!resApi.ok) throw new Error(`CryptoNews sundown error ${resApi.status}`)
@@ -769,7 +858,12 @@ app.get('/api/news/sundown', async (req: Request, res: Response) => {
     const labels = await classifySentimentOpenAI(filtered.map(r => r.title))
     const labeled = filtered.map((r, i) => ({ ...r, sentiment: labels[i]?.sentiment || 'bullish', score: labels[i]?.score ?? 0 }))
     
-    res.json({ items: labeled })
+    const result = { items: labeled }
+    
+    // Cache the result
+    setCache(cacheKey, result)
+    
+    res.json(result)
   } catch (e: any) {
     console.error('Sundown digest error:', e?.message || e)
     res.status(500).json({ error: e?.message || 'sundown_error' })
