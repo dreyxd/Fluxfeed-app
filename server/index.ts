@@ -726,45 +726,46 @@ app.get('/api/news/sundown', async (req: Request, res: Response) => {
     if (!resApi.ok) throw new Error(`CryptoNews sundown error ${resApi.status}`)
     const data = await resApi.json() as any
     
-    console.log('🔍 Sundown digest raw data structure:', JSON.stringify(data, null, 2).substring(0, 1500))
-    
-    // Try different possible structures
+    // Extract digest text paragraphs
     let allNewsItems: any[] = []
     
-    // Check if data is directly an array of news items
     if (Array.isArray(data?.data)) {
       const digests = data.data
       
-      for (const item of digests) {
-        const itemTitle = item?.title || item?.headline || ''
+      for (const digest of digests) {
+        const digestText = digest?.text || ''
         
-        // If this item has nested news/items arrays, extract them
-        if (item?.news && Array.isArray(item.news)) {
-          allNewsItems = allNewsItems.concat(item.news)
-        } else if (item?.items && Array.isArray(item.items)) {
-          allNewsItems = allNewsItems.concat(item.items)
-        }
-        // Otherwise, if it's a regular news item (not a digest header), add it
-        else if (itemTitle && itemTitle.length > 0 && !itemTitle.toLowerCase().includes('sundown digest')) {
-          allNewsItems.push(item)
+        if (digestText && digestText.length > 0) {
+          // Split the digest text into paragraphs (each paragraph is a news summary)
+          const paragraphs = digestText
+            .split('\n\n')
+            .filter((p: string) => p.trim().length > 50) // Only keep substantial paragraphs
+            .map((p: string, idx: number) => ({
+              id: `sundown-${digest.id}-${idx}`,
+              headline: p.substring(0, 100).trim() + (p.length > 100 ? '...' : ''), // Use first 100 chars as headline
+              text: p.trim(),
+              date: digest.date || new Date().toISOString(),
+            }))
+          
+          allNewsItems = allNewsItems.concat(paragraphs)
         }
       }
     }
     
     // Map the individual news items
     const mapped: NewsItem[] = allNewsItems.map((a) => ({
-      id: String(a.id || a.news_id || `sundown-${Date.now()}-${Math.random()}`),
+      id: String(a.id || `sundown-${Date.now()}-${Math.random()}`),
       title: a.headline || a.title || '',
-      source: a.source_name || a.source || 'CryptoNews',
+      source: 'CryptoNews Sundown',
       url: '', // Sundown digest items don't have URLs
       publishedAt: a.date || a.published_at || new Date().toISOString(),
       tickers: [], // No tickers in sundown digest
       image_url: '', // No images in sundown digest
-      text: a.text || a.description || a.summary || '',
+      text: a.text || '',
     }))
     
     const filtered = mapped.filter(m => m.title && m.title.length > 0)
-    console.log(`📰 Sundown digest: extracted ${allNewsItems.length} raw items, mapped ${mapped.length}, filtered ${filtered.length}`)
+    console.log(`📰 Sundown digest: extracted ${allNewsItems.length} paragraphs, filtered ${filtered.length}`)
     const labels = await classifySentimentOpenAI(filtered.map(r => r.title))
     const labeled = filtered.map((r, i) => ({ ...r, sentiment: labels[i]?.sentiment || 'bullish', score: labels[i]?.score ?? 0 }))
     
