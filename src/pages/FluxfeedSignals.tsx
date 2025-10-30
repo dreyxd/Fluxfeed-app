@@ -132,6 +132,9 @@ export default function FluxfeedSignals() {
   });
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [analysisStarted, setAnalysisStarted] = useState(false);
+  const [aiMessages, setAiMessages] = useState<Array<{role: 'user' | 'ai', content: string}>>([]);
+  const [isTyping, setIsTyping] = useState(false);
 
   // keep URL in sync without dropping other params
   useEffect(() => {
@@ -187,9 +190,9 @@ export default function FluxfeedSignals() {
     };
   }, [ticker, windowSel, autoRefresh, manualTick, refreshMs]);
 
-  // Load AI signal (news-only FluxAI)
+  // Load AI signal (news-only FluxAI) - only when analysis is started
   useEffect(() => {
-    if (selectedAI !== "fluxai") return;
+    if (selectedAI !== "fluxai" || !analysisStarted) return;
     let cancelled = false;
     const load = async () => {
       setAnalysisLoading(true);
@@ -227,12 +230,12 @@ export default function FluxfeedSignals() {
       }
     };
     load();
-    const iv = autoRefresh ? setInterval(load, refreshMs) : undefined;
+    const iv = autoRefresh && analysisStarted ? setInterval(load, refreshMs) : undefined;
     return () => {
       cancelled = true;
       if (iv) clearInterval(iv);
     };
-  }, [ticker, timeframe, windowSel, autoRefresh, manualTick, refreshMs, selectedAI]);
+  }, [ticker, timeframe, windowSel, autoRefresh, manualTick, refreshMs, selectedAI, analysisStarted]);
 
   // Filters
   const filtered = useMemo(() => {
@@ -252,9 +255,44 @@ export default function FluxfeedSignals() {
   const tvSymbol = useMemo(() => getTvSymbol(ticker), [ticker]);
   const tvInterval = useMemo(() => timeframeToInterval(timeframe), [timeframe]);
 
+  // Start analysis manually
+  function startAnalysis() {
+    setAnalysisStarted(true);
+    setAiMessages([]);
+    setManualTick((t) => t + 1);
+  }
+
   // Manual refresh triggers both news + signal hooks
   function refreshAnalysis() {
     setManualTick((t) => t + 1);
+  }
+
+  // Handle AI quick questions
+  async function askAI(question: string) {
+    setAiMessages(prev => [...prev, { role: 'user', content: question }]);
+    setIsTyping(true);
+    
+    // Simulate typing delay
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Generate AI response based on current signal data
+    let response = "";
+    
+    if (question.includes("Why")) {
+      response = `Based on my analysis of ${signal.count} news items (${signal.skew.bullish} bullish, ${signal.skew.bearish} bearish), the sentiment is ${signal.newsScore > 0 ? 'positive' : signal.newsScore < 0 ? 'negative' : 'neutral'}. ${signal.drivers.slice(0, 2).join('. ')}.`;
+    } else if (question.includes("confident")) {
+      response = `My confidence level of ${signal.confidence}% is based on ${signal.count} analyzed news items with a ${signal.method === 'stat' ? 'statistical' : 'fallback'} methodology. The news score of ${signal.newsScore.toFixed(2)} indicates ${Math.abs(signal.newsScore) > 0.5 ? 'strong' : 'moderate'} sentiment.`;
+    } else if (question.includes("risk")) {
+      const riskLevel = signal.confidence < 50 ? 'high' : signal.confidence < 70 ? 'medium' : 'low';
+      response = `Risk assessment: ${riskLevel.toUpperCase()}. With ${signal.count} news items analyzed and ${signal.confidence}% confidence, ${signal.health === 'LowCoverage' ? 'data coverage is limited which increases risk' : 'data coverage is healthy'}. ${signal.status === 'NEUTRAL' ? 'Market sentiment is mixed - consider waiting for clearer signals' : `Current ${signal.status} signal suggests ${signal.status === 'BUY' ? 'upside' : 'downside'} momentum`}.`;
+    } else if (question.includes("timeframe")) {
+      response = `For ${ticker} on ${timeframe} timeframe with ${windowSel} news window: ${signal.status === 'BUY' ? 'Consider entering long positions with tight stop-loss' : signal.status === 'SELL' ? 'Consider short positions or exit longs' : 'Wait for clearer directional bias'}. News sentiment ${signal.newsScore > 0 ? 'supports bullish' : signal.newsScore < 0 ? 'supports bearish' : 'shows no clear'} bias.`;
+    } else {
+      response = `I've analyzed ${signal.count} news items for ${ticker}. Current signal: ${signal.status} with ${signal.confidence}% confidence. News score: ${signal.newsScore.toFixed(2)}. ${signal.drivers[0] || 'Market sentiment is evolving'}.`;
+    }
+    
+    setIsTyping(false);
+    setAiMessages(prev => [...prev, { role: 'ai', content: response }]);
   }
 
   // Build analysis meta from current signal
@@ -476,12 +514,17 @@ export default function FluxfeedSignals() {
 
           <SignalCenter
             signal={signal}
-            onStart={refreshAnalysis}
+            onStart={startAnalysis}
             onRefresh={refreshAnalysis}
-            hasAnalysis={signal.count > 0 || signal.confidence > 0 || Boolean(signal.lastUpdated)}
+            hasAnalysis={analysisStarted}
             analysisMeta={analysisMeta}
             loading={analysisLoading}
             error={analysisError}
+            aiMessages={aiMessages}
+            isTyping={isTyping}
+            onAskAI={askAI}
+            bearishCount={bearish.length}
+            bullishCount={bullish.length}
           />
 
           <NewsColumn
@@ -594,6 +637,11 @@ function SignalCenter({
   analysisMeta,
   loading,
   error,
+  aiMessages = [],
+  isTyping = false,
+  onAskAI,
+  bearishCount = 0,
+  bullishCount = 0,
 }: {
   signal: Signal;
   onStart?: () => void;
@@ -608,6 +656,11 @@ function SignalCenter({
   };
   loading?: boolean;
   error?: string | null;
+  aiMessages?: Array<{role: 'user' | 'ai', content: string}>;
+  isTyping?: boolean;
+  onAskAI?: (question: string) => void;
+  bearishCount?: number;
+  bullishCount?: number;
 }) {
   const statusColor =
     signal.status === "BUY" ? "text-emerald-400" : signal.status === "SELL" ? "text-rose-400" : "text-zinc-300";
@@ -621,171 +674,307 @@ function SignalCenter({
     return "text-zinc-400";
   };
 
-  const showStart = !(hasAnalysis ?? (signal.count > 0 || signal.confidence > 0 || Boolean(signal.lastUpdated)));
+  const quickQuestions = [
+    "Why this signal?",
+    "How confident are you?",
+    "What are the risks?",
+    "Best entry for this timeframe?",
+  ];
 
   const barPct = Math.min(100, Math.abs(((analysisMeta?.aggregateScore ?? 0) / 1.5) * 100));
-  const barLeft = Math.max(0, 50 - barPct / 2);
-  const barRight = Math.max(0, 50 - barPct / 2);
 
   return (
-    <section aria-label="AI trading signal" className="rounded-2xl border border-zinc-800 bg-zinc-900/40">
-      <div className="flex items-center justify-between gap-2 border-b border-zinc-800 px-4 py-3">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-200">FluxAI</h3>
-        <div className="text-xs text-zinc-500">
-          <span>Updated {timeAgo(signal.lastUpdated)}</span>
+    <section aria-label="AI trading signal" className="rounded-2xl border border-zinc-800 bg-zinc-900/40 flex flex-col max-h-[720px]">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-2 border-b border-zinc-800 px-4 py-3 shrink-0">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-200">FluxAI</h3>
+          {hasAnalysis && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400 ring-1 ring-emerald-500/20">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+              </span>
+              ACTIVE
+            </span>
+          )}
         </div>
+        {hasAnalysis && (
+          <div className="text-xs text-zinc-500">
+            <span>Updated {timeAgo(signal.lastUpdated)}</span>
+          </div>
+        )}
       </div>
 
-      <div className="space-y-4 p-4">
-        {/* CTA */}
-        {!loading && (
-          <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950/40 p-6 text-center">
-            {showStart ? (
-              <>
-                <div className="text-sm text-zinc-400">FluxAI is ready to analyze headlines.</div>
-                <button
-                  onClick={onStart}
-                  className="rounded-xl bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-600"
-                >
+      {/* Content Area - Scrollable */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="space-y-4 p-4">
+          {/* Initial State - Start Analysis Button */}
+          {!hasAnalysis && !loading && (
+            <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-zinc-800 bg-zinc-950/60 p-8 text-center">
+              <div className="rounded-full bg-orange-600/10 p-4 ring-1 ring-orange-600/20">
+                <svg className="h-8 w-8 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </div>
+              <div>
+                <h4 className="text-lg font-semibold text-zinc-100">Ready to Analyze</h4>
+                <p className="mt-2 text-sm text-zinc-400">
+                  FluxAI will analyze all fetched news from both Bearish and Bullish streams
+                </p>
+                <div className="mt-3 flex items-center justify-center gap-4 text-xs text-zinc-500">
+                  <span>{bearishCount} Bearish</span>
+                  <span>•</span>
+                  <span>{bullishCount} Bullish</span>
+                </div>
+              </div>
+              <button
+                onClick={onStart}
+                className="group relative overflow-hidden rounded-xl bg-gradient-to-r from-orange-600 to-orange-500 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-orange-600/20 transition-all hover:shadow-xl hover:shadow-orange-600/30 focus:outline-none focus:ring-2 focus:ring-orange-600"
+              >
+                <span className="relative z-10 flex items-center gap-2">
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
                   Start Analysis
-                </button>
-              </>
-            ) : (
-              <>
-                <div className="text-sm text-zinc-400">
-                  Analysis complete. Click refresh to re-analyze with latest news.
+                </span>
+                <div className="absolute inset-0 -z-0 bg-gradient-to-r from-orange-500 to-orange-400 opacity-0 transition-opacity group-hover:opacity-100"></div>
+              </button>
+            </div>
+          )}
+
+          {/* Loading State */}
+          {loading && (
+            <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-zinc-800 bg-zinc-950/60 p-8 text-center">
+              <div className="relative">
+                <div className="h-16 w-16 animate-spin rounded-full border-4 border-zinc-800 border-t-orange-500"></div>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="h-8 w-8 animate-pulse rounded-full bg-orange-500/20"></div>
                 </div>
-                <button
-                  onClick={onRefresh}
-                  className="rounded-xl bg-zinc-700 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-600 focus:outline-none focus:ring-2 focus:ring-orange-600"
-                >
-                  Refresh Analysis
-                </button>
-              </>
-            )}
-          </div>
-        )}
-
-        {loading && (
-          <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950/40 p-6 text-center">
-            <div className="text-sm text-zinc-400">Analyzing...</div>
-            <div className="h-1 w-32 overflow-hidden rounded-full bg-zinc-800">
-              <div className="h-full w-1/2 animate-pulse bg-orange-600"></div>
-            </div>
-          </div>
-        )}
-
-        {error && (
-          <div className="rounded-lg border border-rose-800/40 bg-rose-900/20 p-3 text-sm text-rose-200">{error}</div>
-        )}
-
-        {/* Signal header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <div className={cn("text-4xl font-black tracking-tight", statusColor)}>{signal.status}</div>
-            <div className="mt-1 text-sm text-zinc-400">
-              {signal.ticker} • TF {signal.timeframe}
-            </div>
-          </div>
-          <div className="text-right">
-            <div className="text-3xl font-bold text-zinc-100">{signal.confidence}%</div>
-            <div className="text-xs uppercase tracking-wide text-zinc-500">Confidence</div>
-          </div>
-        </div>
-
-        {/* Aggregate Sentiment */}
-        {analysisMeta && analysisMeta.aggregateScore !== undefined && (
-          <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
-            <div className="flex items-center justify-between">
+              </div>
               <div>
-                <div className="mb-1 text-xs uppercase text-zinc-500">Aggregated News Sentiment</div>
-                <div className="flex items-baseline gap-2">
-                  <span className={cn("text-2xl font-bold", scoreColor(analysisMeta.aggregateScore))}>
-                    {analysisMeta.aggregateScore > 0 ? "+" : ""}
-                    {analysisMeta.aggregateScore.toFixed(2)}
-                  </span>
-                  <span className="text-sm text-zinc-500">/ ±1.5</span>
+                <h4 className="text-lg font-semibold text-zinc-100">Analyzing News...</h4>
+                <p className="mt-2 text-sm text-zinc-400">
+                  Processing {bearishCount + bullishCount} news items
+                </p>
+              </div>
+              <div className="w-full max-w-xs">
+                <div className="h-2 overflow-hidden rounded-full bg-zinc-800">
+                  <div className="h-full w-full animate-pulse bg-gradient-to-r from-orange-600 via-orange-500 to-orange-600 bg-[length:200%_100%]" style={{animation: 'pulse 1.5s ease-in-out infinite, shimmer 2s linear infinite'}}></div>
                 </div>
               </div>
-              <div className="text-right">
-                <div
-                  className={cn(
-                    "text-lg font-semibold capitalize",
-                    analysisMeta.aggregateSentiment === "bullish"
-                      ? "text-emerald-400"
-                      : analysisMeta.aggregateSentiment === "bearish"
-                      ? "text-rose-400"
-                      : "text-zinc-400"
-                  )}
-                >
-                  {analysisMeta.aggregateSentiment || "Neutral"}
+            </div>
+          )}
+
+          {/* Error State */}
+          {error && !loading && (
+            <div className="rounded-xl border border-rose-800/40 bg-rose-900/20 p-4">
+              <div className="flex items-start gap-3">
+                <svg className="h-5 w-5 shrink-0 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div>
+                  <h4 className="text-sm font-semibold text-rose-200">Analysis Error</h4>
+                  <p className="mt-1 text-sm text-rose-300/80">{error}</p>
                 </div>
-                <div className="text-xs text-zinc-500">Overall</div>
               </div>
             </div>
-            {/* Centered bar from neutral (50%) */}
-            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-zinc-800">
-              <div
-                className={cn("h-full", (analysisMeta.aggregateScore ?? 0) >= 0 ? "bg-emerald-500" : "bg-rose-500")}
-                style={{
-                  width: `${barPct}%`,
-                  marginLeft:
-                    (analysisMeta.aggregateScore ?? 0) >= 0
-                      ? "50%"
-                      : `${barLeft}%`, // visually expand left
-                  marginRight:
-                    (analysisMeta.aggregateScore ?? 0) < 0 ? "50%" : `${barRight}%`,
-                }}
-              />
-            </div>
-          </div>
-        )}
+          )}
 
-        {/* Health */}
-        {signal.health !== "Healthy" && (
-          <div className="rounded-xl border border-yellow-800/40 bg-yellow-900/20 p-3">
-            <div className="flex items-center gap-2">
-              <span className="text-yellow-400">⚠️</span>
-              <div>
-                <div className="text-sm font-semibold text-yellow-200">System Status: {signal.health}</div>
-                <div className="text-xs text-yellow-300/80">Data may be limited in this window</div>
+          {/* Analysis Complete - Signal Display */}
+          {hasAnalysis && !loading && (
+            <>
+              {/* Signal Header */}
+              <div className="rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-950/80 to-zinc-900/60 p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-xs uppercase tracking-wide text-zinc-500 mb-1">Signal</div>
+                    <div className={cn("text-4xl font-black tracking-tight", statusColor)}>{signal.status}</div>
+                    <div className="mt-1 text-sm text-zinc-400">
+                      {signal.ticker} • {signal.timeframe}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs uppercase tracking-wide text-zinc-500 mb-1">Confidence</div>
+                    <div className="text-4xl font-black text-zinc-100">{signal.confidence}<span className="text-xl text-zinc-500">%</span></div>
+                    <div className="mt-1 h-1.5 w-20 overflow-hidden rounded-full bg-zinc-800">
+                      <div
+                        className={cn("h-full transition-all", signal.confidence >= 70 ? "bg-emerald-500" : signal.confidence >= 50 ? "bg-yellow-500" : "bg-rose-500")}
+                        style={{ width: `${signal.confidence}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
 
-        {/* News Items Analyzed */}
-        <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
-          <div className="flex items-center justify-between">
-            <div className="text-xs uppercase text-zinc-500">News Items Analyzed</div>
-            <div className="text-lg font-semibold text-zinc-200">{signal.count}</div>
-          </div>
-          <div className="mt-1 text-xs text-zinc-500">
-            Skew: {signal.skew.bullish} bullish vs {signal.skew.bearish} bearish • Source:{" "}
-            {signal.method === "stat" ? "STAT" : "Fallback"}
-          </div>
-        </div>
+              {/* News Analysis Summary */}
+              <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">News Analysis</div>
+                  <div className="text-xs text-zinc-500">{signal.count} items</div>
+                </div>
+                
+                {/* Sentiment Score */}
+                {analysisMeta && analysisMeta.aggregateScore !== undefined && (
+                  <div className="space-y-3">
+                    <div className="flex items-baseline justify-between">
+                      <div>
+                        <span className={cn("text-3xl font-bold", scoreColor(analysisMeta.aggregateScore))}>
+                          {analysisMeta.aggregateScore > 0 ? "+" : ""}
+                          {analysisMeta.aggregateScore.toFixed(2)}
+                        </span>
+                        <span className="ml-2 text-sm text-zinc-500">/ ±1.5</span>
+                      </div>
+                      <div className={cn("text-lg font-semibold capitalize", analysisMeta.aggregateSentiment === "bullish" ? "text-emerald-400" : analysisMeta.aggregateSentiment === "bearish" ? "text-rose-400" : "text-zinc-400")}>
+                        {analysisMeta.aggregateSentiment || "Neutral"}
+                      </div>
+                    </div>
+                    
+                    {/* Sentiment Bar */}
+                    <div className="relative h-3 w-full overflow-hidden rounded-full bg-zinc-800">
+                      <div className="absolute left-1/2 h-full w-0.5 bg-zinc-600"></div>
+                      <div
+                        className={cn("h-full transition-all", (analysisMeta.aggregateScore ?? 0) >= 0 ? "bg-emerald-500" : "bg-rose-500")}
+                        style={{
+                          width: `${barPct}%`,
+                          marginLeft: (analysisMeta.aggregateScore ?? 0) >= 0 ? "50%" : `${50 - barPct}%`,
+                        }}
+                      ></div>
+                    </div>
 
-        {/* Why */}
-        {(analysisMeta?.sentimentSummary || (analysisMeta?.newsReasons?.length ?? 0) > 0) && (
-          <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">Why</div>
-            {analysisMeta?.sentimentSummary && (
-              <div className="mb-2 text-xs text-zinc-400">{analysisMeta.sentimentSummary}</div>
-            )}
-            {analysisMeta?.newsReasons?.length ? (
-              <>
-                <div className="mb-1 text-xs uppercase text-zinc-500">News Drivers</div>
-                <ul className="ml-4 list-disc space-y-1 text-sm text-zinc-300">
-                  {analysisMeta.newsReasons.map((r, i) => (
-                    <li key={`n-${i}`}>{r}</li>
+                    {/* Skew Stats */}
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2 text-rose-400">
+                        <div className="h-2 w-2 rounded-full bg-rose-500"></div>
+                        <span>{signal.skew.bearish} Bearish</span>
+                      </div>
+                      <div className="text-zinc-500">vs</div>
+                      <div className="flex items-center gap-2 text-emerald-400">
+                        <div className="h-2 w-2 rounded-full bg-emerald-500"></div>
+                        <span>{signal.skew.bullish} Bullish</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Key Drivers */}
+              {signal.drivers && signal.drivers.length > 0 && (
+                <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
+                  <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">Key Drivers</div>
+                  <ul className="space-y-2">
+                    {signal.drivers.slice(0, 5).map((driver, idx) => (
+                      <li key={idx} className="flex items-start gap-2 text-sm">
+                        <svg className="h-4 w-4 shrink-0 mt-0.5 text-orange-500" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clipRule="evenodd" />
+                        </svg>
+                        <span className="text-zinc-300">{driver}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Health Warning */}
+              {signal.health !== "Healthy" && (
+                <div className="rounded-xl border border-yellow-800/40 bg-yellow-900/20 p-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-yellow-400">⚠️</span>
+                    <div>
+                      <div className="text-sm font-semibold text-yellow-200">Low Coverage</div>
+                      <div className="text-xs text-yellow-300/80">Limited data in this window</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* AI Chat Messages */}
+              {aiMessages.length > 0 && (
+                <div className="space-y-3">
+                  {aiMessages.map((msg, idx) => (
+                    <div key={idx} className={cn("flex", msg.role === 'user' ? "justify-end" : "justify-start")}>
+                      <div className={cn("max-w-[85%] rounded-xl px-4 py-2.5 text-sm", msg.role === 'user' ? "bg-orange-600 text-white" : "bg-zinc-800 text-zinc-100")}>
+                        {msg.role === 'ai' ? (
+                          <TypewriterText text={msg.content} />
+                        ) : (
+                          msg.content
+                        )}
+                      </div>
+                    </div>
                   ))}
-                </ul>
-              </>
-            ) : null}
-          </div>
-        )}
+                  {isTyping && (
+                    <div className="flex justify-start">
+                      <div className="max-w-[85%] rounded-xl bg-zinc-800 px-4 py-2.5">
+                        <div className="flex items-center gap-1">
+                          <div className="h-2 w-2 animate-bounce rounded-full bg-zinc-500" style={{animationDelay: '0ms'}}></div>
+                          <div className="h-2 w-2 animate-bounce rounded-full bg-zinc-500" style={{animationDelay: '150ms'}}></div>
+                          <div className="h-2 w-2 animate-bounce rounded-full bg-zinc-500" style={{animationDelay: '300ms'}}></div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
+
+      {/* Footer - Quick Questions (only show when analysis is complete) */}
+      {hasAnalysis && !loading && (
+        <div className="border-t border-zinc-800 p-3 shrink-0">
+          <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Quick Questions</div>
+          <div className="flex flex-wrap gap-2">
+            {quickQuestions.map((q, idx) => (
+              <button
+                key={idx}
+                onClick={() => onAskAI?.(q)}
+                disabled={isTyping}
+                className="rounded-lg border border-zinc-700 bg-zinc-800/50 px-3 py-1.5 text-xs text-zinc-300 transition-all hover:border-orange-600 hover:bg-orange-600/10 hover:text-orange-400 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+          {hasAnalysis && (
+            <button
+              onClick={onRefresh}
+              className="mt-3 w-full rounded-lg border border-zinc-700 bg-zinc-800/50 px-4 py-2 text-xs font-medium text-zinc-300 transition-all hover:border-zinc-600 hover:bg-zinc-800 hover:text-zinc-100"
+            >
+              <span className="flex items-center justify-center gap-2">
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Refresh Analysis
+              </span>
+            </button>
+          )}
+        </div>
+      )}
     </section>
   );
+}
+
+// Typewriter effect component
+function TypewriterText({ text }: { text: string }) {
+  const [displayText, setDisplayText] = useState('');
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  useEffect(() => {
+    if (currentIndex < text.length) {
+      const timeout = setTimeout(() => {
+        setDisplayText(prev => prev + text[currentIndex]);
+        setCurrentIndex(prev => prev + 1);
+      }, 20); // typing speed
+      return () => clearTimeout(timeout);
+    }
+  }, [currentIndex, text]);
+
+  useEffect(() => {
+    setDisplayText('');
+    setCurrentIndex(0);
+  }, [text]);
+
+  return <span className="font-mono">{displayText}<span className="animate-pulse">|</span></span>;
+}
 }
