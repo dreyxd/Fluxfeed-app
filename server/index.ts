@@ -726,6 +726,8 @@ app.get('/api/news/sundown', async (req: Request, res: Response) => {
     if (!resApi.ok) throw new Error(`CryptoNews sundown error ${resApi.status}`)
     const data = await resApi.json() as any
     
+    console.log('🔍 Sundown digest raw data structure:', JSON.stringify(data).substring(0, 500))
+    
     // Try different possible structures
     let allNewsItems: any[] = []
     
@@ -734,27 +736,17 @@ app.get('/api/news/sundown', async (req: Request, res: Response) => {
       const digests = data.data
       
       for (const item of digests) {
-        // Skip the digest header itself (it has "Sundown Digest" in the title)
         const itemTitle = item?.title || item?.headline || ''
-        if (itemTitle.toLowerCase().includes('sundown digest')) {
-          // This is a digest container, extract news from it
-          if (item?.news && Array.isArray(item.news)) {
-            allNewsItems = allNewsItems.concat(item.news)
-          } else if (item?.items && Array.isArray(item.items)) {
-            allNewsItems = allNewsItems.concat(item.items)
-          }
-        }
-        // Check if item itself is a news article (not a digest header)
-        else if (itemTitle && itemTitle.length > 0) {
-          allNewsItems.push(item)
-        }
-        // Check if item contains nested news array
-        else if (item?.news && Array.isArray(item.news)) {
+        
+        // If this item has nested news/items arrays, extract them
+        if (item?.news && Array.isArray(item.news)) {
           allNewsItems = allNewsItems.concat(item.news)
-        }
-        // Check for items array
-        else if (item?.items && Array.isArray(item.items)) {
+        } else if (item?.items && Array.isArray(item.items)) {
           allNewsItems = allNewsItems.concat(item.items)
+        }
+        // Otherwise, if it's a regular news item (not a digest header), add it
+        else if (itemTitle && itemTitle.length > 0 && !itemTitle.toLowerCase().includes('sundown digest')) {
+          allNewsItems.push(item)
         }
       }
     }
@@ -772,6 +764,7 @@ app.get('/api/news/sundown', async (req: Request, res: Response) => {
     }))
     
     const filtered = mapped.filter(m => m.title && m.title.length > 0)
+    console.log(`📰 Sundown digest: extracted ${allNewsItems.length} raw items, mapped ${mapped.length}, filtered ${filtered.length}`)
     const labels = await classifySentimentOpenAI(filtered.map(r => r.title))
     const labeled = filtered.map((r, i) => ({ ...r, sentiment: labels[i]?.sentiment || 'bullish', score: labels[i]?.score ?? 0 }))
     
