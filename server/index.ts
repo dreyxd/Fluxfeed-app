@@ -73,6 +73,12 @@ app.use(cors({
     // Allow requests with no origin (mobile apps, Postman, etc.)
     if (!origin) return callback(null, true)
     
+    // Allow all Vercel preview deployments
+    if (origin && origin.includes('vercel.app')) {
+      console.log('✅ CORS allowed for Vercel preview:', origin)
+      return callback(null, true)
+    }
+    
     if (allowedOrigins.includes(origin)) {
       console.log('✅ CORS allowed for origin:', origin)
       callback(null, true)
