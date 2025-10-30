@@ -145,7 +145,6 @@ export default function FluxfeedSignals() {
   
   // Ticker search state
   const [tickerSearch, setTickerSearch] = useState<string>("");
-  const [showTickerDropdown, setShowTickerDropdown] = useState<boolean>(false);
 
   // signal state
   const [signal, setSignal] = useState<Signal>({
@@ -170,7 +169,7 @@ export default function FluxfeedSignals() {
 
   // Filtered ticker options based on search
   const filteredTickers = useMemo(() => {
-    if (!tickerSearch.trim()) return TICKER_OPTIONS;
+    if (!tickerSearch.trim()) return [];  // Don't show any options until user types
     const search = tickerSearch.toLowerCase();
     return TICKER_OPTIONS.filter(t => t.toLowerCase().includes(search));
   }, [tickerSearch]);
@@ -394,16 +393,11 @@ export default function FluxfeedSignals() {
                   id="ticker-search"
                   type="text"
                   value={tickerSearch}
-                  onChange={(e) => {
-                    setTickerSearch(e.target.value);
-                    setShowTickerDropdown(true);
-                  }}
-                  onFocus={() => setShowTickerDropdown(true)}
-                  onBlur={() => setTimeout(() => setShowTickerDropdown(false), 200)}
+                  onChange={(e) => setTickerSearch(e.target.value)}
                   placeholder={`${ticker} - Search ticker...`}
                   className="h-10 w-32 rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-orange-600"
                 />
-                {showTickerDropdown && filteredTickers.length > 0 && (
+                {tickerSearch.trim() && filteredTickers.length > 0 && (
                   <div className="absolute top-11 z-50 max-h-64 w-32 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-900 shadow-xl">
                     {filteredTickers.map((t) => (
                       <button
@@ -411,7 +405,6 @@ export default function FluxfeedSignals() {
                         onClick={() => {
                           setTicker(t);
                           setTickerSearch("");
-                          setShowTickerDropdown(false);
                         }}
                         className={cn(
                           "w-full px-3 py-2 text-left text-sm hover:bg-zinc-800 transition-colors",
