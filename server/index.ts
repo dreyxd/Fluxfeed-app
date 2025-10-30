@@ -555,16 +555,16 @@ app.get('/api/news/general', async (req: Request, res: Response) => {
     const itemsPerSentiment = Math.ceil(totalItems / 2)
     const page = Math.max(1, Number(req.query.page || 1))
     
-    // Fetch both positive and negative sentiment news for balanced feed
-    const urlPositive = new URL('https://cryptonews-api.com/api/v1')
-    urlPositive.searchParams.set('tickers', 'BTC,ETH,BNB,SOL,XRP')
+    // Use the "All Ticker News" endpoint for fetching news across all crypto coins
+    const urlPositive = new URL('https://cryptonews-api.com/api/v1/category')
+    urlPositive.searchParams.set('section', 'alltickers')
     urlPositive.searchParams.set('items', String(itemsPerSentiment))
     urlPositive.searchParams.set('page', String(page))
     urlPositive.searchParams.set('sentiment', 'positive')
     urlPositive.searchParams.set('token', CRYPTONEWS_API_KEY)
     
-    const urlNegative = new URL('https://cryptonews-api.com/api/v1')
-    urlNegative.searchParams.set('tickers', 'BTC,ETH,BNB,SOL,XRP')
+    const urlNegative = new URL('https://cryptonews-api.com/api/v1/category')
+    urlNegative.searchParams.set('section', 'alltickers')
     urlNegative.searchParams.set('items', String(itemsPerSentiment))
     urlNegative.searchParams.set('page', String(page))
     urlNegative.searchParams.set('sentiment', 'negative')
