@@ -114,6 +114,10 @@ export default function FluxfeedSignals() {
   const [refreshMs, setRefreshMs] = useState<number>(30000);
   const [selectedAI, setSelectedAI] = useState<string>(searchParams.get("ai") || "fluxai");
   const [showToast, setShowToast] = useState<string | null>(null);
+  
+  // Ticker search state
+  const [tickerSearch, setTickerSearch] = useState<string>("");
+  const [showTickerDropdown, setShowTickerDropdown] = useState<boolean>(false);
 
   // signal state
   const [signal, setSignal] = useState<Signal>({
@@ -135,6 +139,13 @@ export default function FluxfeedSignals() {
   const [analysisStarted, setAnalysisStarted] = useState(false);
   const [aiMessages, setAiMessages] = useState<Array<{role: 'user' | 'ai', content: string}>>([]);
   const [isTyping, setIsTyping] = useState(false);
+
+  // Filtered ticker options based on search
+  const filteredTickers = useMemo(() => {
+    if (!tickerSearch.trim()) return TICKER_OPTIONS;
+    const search = tickerSearch.toLowerCase();
+    return TICKER_OPTIONS.filter(t => t.toLowerCase().includes(search));
+  }, [tickerSearch]);
 
   // keep URL in sync without dropping other params
   useEffect(() => {
@@ -348,18 +359,43 @@ export default function FluxfeedSignals() {
             </Link>
 
             <div className="flex flex-1 flex-wrap items-center justify-end gap-2 md:gap-3">
-              {/* Ticker */}
-              <label className="sr-only" htmlFor="ticker">Ticker</label>
-              <select
-                id="ticker"
-                value={ticker}
-                onChange={(e) => setTicker(e.target.value)}
-                className="h-10 rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-600"
-              >
-                {TICKER_OPTIONS.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
+              {/* Ticker Search */}
+              <div className="relative">
+                <label className="sr-only" htmlFor="ticker-search">Search Ticker</label>
+                <input
+                  id="ticker-search"
+                  type="text"
+                  value={tickerSearch}
+                  onChange={(e) => {
+                    setTickerSearch(e.target.value);
+                    setShowTickerDropdown(true);
+                  }}
+                  onFocus={() => setShowTickerDropdown(true)}
+                  onBlur={() => setTimeout(() => setShowTickerDropdown(false), 200)}
+                  placeholder={`${ticker} - Search ticker...`}
+                  className="h-10 w-32 rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-orange-600"
+                />
+                {showTickerDropdown && filteredTickers.length > 0 && (
+                  <div className="absolute top-11 z-50 max-h-64 w-32 overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-900 shadow-xl">
+                    {filteredTickers.map((t) => (
+                      <button
+                        key={t}
+                        onClick={() => {
+                          setTicker(t);
+                          setTickerSearch("");
+                          setShowTickerDropdown(false);
+                        }}
+                        className={cn(
+                          "w-full px-3 py-2 text-left text-sm hover:bg-zinc-800 transition-colors",
+                          ticker === t && "bg-orange-600/20 text-orange-500"
+                        )}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {/* News window */}
               <label className="sr-only" htmlFor="window">News window</label>
