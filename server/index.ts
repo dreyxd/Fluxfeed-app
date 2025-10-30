@@ -726,8 +726,6 @@ app.get('/api/news/sundown', async (req: Request, res: Response) => {
     if (!resApi.ok) throw new Error(`CryptoNews sundown error ${resApi.status}`)
     const data = await resApi.json() as any
     
-    console.log('Sundown digest raw data:', JSON.stringify(data).substring(0, 500))
-    
     // Try different possible structures
     let allNewsItems: any[] = []
     
@@ -751,8 +749,6 @@ app.get('/api/news/sundown', async (req: Request, res: Response) => {
       }
     }
     
-    console.log(`Sundown digest: extracted ${allNewsItems.length} news items`)
-    
     // Map the individual news items
     const mapped: NewsItem[] = allNewsItems.map((a) => ({
       id: String(a.id || a.news_id || `sundown-${Date.now()}-${Math.random()}`),
@@ -769,7 +765,6 @@ app.get('/api/news/sundown', async (req: Request, res: Response) => {
     const labels = await classifySentimentOpenAI(filtered.map(r => r.title))
     const labeled = filtered.map((r, i) => ({ ...r, sentiment: labels[i]?.sentiment || 'bullish', score: labels[i]?.score ?? 0 }))
     
-    console.log(`Sundown digest: returning ${labeled.length} labeled items`)
     res.json({ items: labeled })
   } catch (e: any) {
     console.error('Sundown digest error:', e?.message || e)
