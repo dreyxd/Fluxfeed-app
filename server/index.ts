@@ -797,68 +797,60 @@ app.get('/api/news/trending', async (req: Request, res: Response) => {
   }
 })
 
-// Sundown Digest endpoint
+// Sundown Digest endpoint - returns digests grouped by date
 app.get('/api/news/sundown', async (req: Request, res: Response) => {
   try {
-    if (!CRYPTONEWS_API_KEY) return res.json({ items: [] })
-    const page = Math.max(1, Number(req.query.page || 1))
+    if (!CRYPTONEWS_API_KEY) return res.json({ digests: [] })
+    const daysBack = Math.min(30, Number(req.query.days || 7)) // Default 7 days, max 30
     
     // Check cache first
-    const cacheKey = `sundown-news-${page}`
+    const cacheKey = `sundown-digests-${daysBack}`
     const cached = getCached(cacheKey)
     if (cached) {
       return res.json(cached)
     }
     
-    const url = `https://cryptonews-api.com/api/v1/sundown-digest?page=${page}&token=${CRYPTONEWS_API_KEY}`
-    const resApi = await fetch(url)
-    if (!resApi.ok) throw new Error(`CryptoNews sundown error ${resApi.status}`)
-    const data = await resApi.json() as any
+    // Fetch multiple pages to get last 7-30 days
+    const promises = []
+    for (let page = 1; page <= 3; page++) {
+      const url = `https://cryptonews-api.com/api/v1/sundown-digest?page=${page}&token=${CRYPTONEWS_API_KEY}`
+      promises.push(fetch(url).then(r => r.json()))
+    }
     
-    // Extract digest text paragraphs
-    let allNewsItems: any[] = []
+    const results = await Promise.all(promises)
+    const allDigests: any[] = []
     
-    if (Array.isArray(data?.data)) {
-      const digests = data.data
-      
-      for (const digest of digests) {
-        const digestText = digest?.text || ''
-        
-        if (digestText && digestText.length > 0) {
-          // Split the digest text into paragraphs (each paragraph is a news summary)
-          const paragraphs = digestText
-            .split('\n\n')
-            .filter((p: string) => p.trim().length > 50) // Only keep substantial paragraphs
-            .map((p: string, idx: number) => ({
-              id: `sundown-${digest.id}-${idx}`,
-              headline: p.substring(0, 100).trim() + (p.length > 100 ? '...' : ''), // Use first 100 chars as headline
-              text: p.trim(),
-              date: digest.date || new Date().toISOString(),
-            }))
-          
-          allNewsItems = allNewsItems.concat(paragraphs)
-        }
+    for (const data of results) {
+      if (Array.isArray(data?.data)) {
+        allDigests.push(...data.data)
       }
     }
     
-    // Map the individual news items
-    const mapped: NewsItem[] = allNewsItems.map((a) => ({
-      id: String(a.id || `sundown-${Date.now()}-${Math.random()}`),
-      title: a.headline || a.title || '',
-      source: 'CryptoNews Sundown',
-      url: '', // Sundown digest items don't have URLs
-      publishedAt: a.date || a.published_at || new Date().toISOString(),
-      tickers: [], // No tickers in sundown digest
-      image_url: '', // No images in sundown digest
-      text: a.text || '',
-    }))
+    // Process digests - keep them grouped by date
+    const processedDigests = allDigests
+      .filter(d => d?.headline && d?.text)
+      .slice(0, daysBack)
+      .map(digest => {
+        // Split the digest text into paragraphs
+        const paragraphs = digest.text
+          .split('\n\n')
+          .filter((p: string) => p.trim().length > 50)
+          .map((p: string) => p.trim())
+        
+        return {
+          id: String(digest.id),
+          title: digest.headline || `Sundown Digest ${new Date(digest.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`,
+          date: digest.date || new Date().toISOString(),
+          source: 'CryptoNews Sundown',
+          paragraphs: paragraphs,
+          summary: paragraphs.length > 0 ? paragraphs[0].substring(0, 150) + '...' : '',
+          itemCount: paragraphs.length
+        }
+      })
     
-    const filtered = mapped.filter(m => m.title && m.title.length > 0)
-    console.log(`📰 Sundown digest: extracted ${allNewsItems.length} paragraphs, filtered ${filtered.length}`)
-    const labels = await classifySentimentOpenAI(filtered.map(r => r.title))
-    const labeled = filtered.map((r, i) => ({ ...r, sentiment: labels[i]?.sentiment || 'bullish', score: labels[i]?.score ?? 0 }))
+    console.log(`📰 Sundown digest: processed ${processedDigests.length} digests`)
     
-    const result = { items: labeled }
+    const result = { digests: processedDigests }
     
     // Cache the result
     setCache(cacheKey, result)

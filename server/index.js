@@ -8,6 +8,38 @@ const PORT = Number(process.env.PORT || 8787);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5-mini';
 const CRYPTONEWS_API_KEY = process.env.CRYPTONEWS_API_KEY || '';
+const cache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes cache
+function getCached(key) {
+    const cached = cache.get(key);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        console.log(`📦 Cache HIT for key: ${key}`);
+        return cached.data;
+    }
+    if (cached) {
+        cache.delete(key); // Remove expired cache
+        console.log(`🗑️  Cache EXPIRED for key: ${key}`);
+    }
+    return null;
+}
+function setCache(key, data) {
+    cache.set(key, { data, timestamp: Date.now() });
+    console.log(`💾 Cache SET for key: ${key}`);
+}
+// Clean up expired cache entries every 10 minutes
+setInterval(() => {
+    const now = Date.now();
+    let cleaned = 0;
+    for (const [key, entry] of cache.entries()) {
+        if (now - entry.timestamp >= CACHE_TTL) {
+            cache.delete(key);
+            cleaned++;
+        }
+    }
+    if (cleaned > 0) {
+        console.log(`🧹 Cache cleanup: removed ${cleaned} expired entries`);
+    }
+}, 10 * 60 * 1000);
 // Allowed origins for CORS
 const allowedOrigins = [
     'http://localhost:5173', // Development - App
@@ -143,7 +175,14 @@ function aggregateHeadlineScores(items) {
 async function fetchCryptoNews(tickers, sinceMinutes = 1440, opts) {
     if (!CRYPTONEWS_API_KEY)
         return [];
+    // Create cache key based on parameters
     const list = Array.isArray(tickers) ? tickers : [tickers];
+    const cacheKey = `crypto-news-${list.join(',')}-${sinceMinutes}-${opts?.sentiment || 'all'}-${opts?.items || 50}-${opts?.page || 1}`;
+    // Check cache first
+    const cached = getCached(cacheKey);
+    if (cached) {
+        return cached;
+    }
     const url = new URL('https://cryptonews-api.com/api/v1');
     if (list.length === 1)
         url.searchParams.set('tickers-only', list[0]);
@@ -184,7 +223,10 @@ async function fetchCryptoNews(tickers, sinceMinutes = 1440, opts) {
         return { id, title, source, url: urlA, publishedAt, tickers: ticks, sentiment, score };
     });
     const cutoff = Date.now() - minutesToMs(sinceMinutes);
-    return mapped.filter(m => new Date(m.publishedAt).getTime() >= cutoff);
+    const filtered = mapped.filter(m => new Date(m.publishedAt).getTime() >= cutoff);
+    // Cache the result
+    setCache(cacheKey, filtered);
+    return filtered;
 }
 // ----------------------------- OpenAI helper -----------------------------
 async function classifySentimentOpenAI(texts) {
@@ -553,7 +595,7 @@ app.get('/api/stat/general', async (req, res) => {
         res.status(500).json({ error: e?.message || 'stat_general_error' });
     }
 });
-// Landing “general” news
+// Landing "general" news
 app.get('/api/news/general', async (req, res) => {
     try {
         if (!CRYPTONEWS_API_KEY)
@@ -561,15 +603,21 @@ app.get('/api/news/general', async (req, res) => {
         const totalItems = Math.min(100, Number(req.query.items || 12));
         const itemsPerSentiment = Math.ceil(totalItems / 2);
         const page = Math.max(1, Number(req.query.page || 1));
-        // Fetch both positive and negative sentiment news for balanced feed
-        const urlPositive = new URL('https://cryptonews-api.com/api/v1');
-        urlPositive.searchParams.set('tickers', 'BTC,ETH,BNB,SOL,XRP');
+        // Check cache first
+        const cacheKey = `general-news-${totalItems}-${page}`;
+        const cached = getCached(cacheKey);
+        if (cached) {
+            return res.json(cached);
+        }
+        // Use the "All Ticker News" endpoint for fetching news across all crypto coins
+        const urlPositive = new URL('https://cryptonews-api.com/api/v1/category');
+        urlPositive.searchParams.set('section', 'alltickers');
         urlPositive.searchParams.set('items', String(itemsPerSentiment));
         urlPositive.searchParams.set('page', String(page));
         urlPositive.searchParams.set('sentiment', 'positive');
         urlPositive.searchParams.set('token', CRYPTONEWS_API_KEY);
-        const urlNegative = new URL('https://cryptonews-api.com/api/v1');
-        urlNegative.searchParams.set('tickers', 'BTC,ETH,BNB,SOL,XRP');
+        const urlNegative = new URL('https://cryptonews-api.com/api/v1/category');
+        urlNegative.searchParams.set('section', 'alltickers');
         urlNegative.searchParams.set('items', String(itemsPerSentiment));
         urlNegative.searchParams.set('page', String(page));
         urlNegative.searchParams.set('sentiment', 'negative');
@@ -595,6 +643,8 @@ app.get('/api/news/general', async (req, res) => {
             url: a.news_url || a.url,
             publishedAt: a.date || a.published_at || new Date().toISOString(),
             tickers: Array.isArray(a.tickers) ? a.tickers : (typeof a.ticker === 'string' ? [a.ticker] : []),
+            image_url: a.image_url || a.thumbnail || '',
+            text: a.text || a.description || a.summary || '',
             // Preserve the original CryptoNews sentiment
             cryptoNewsSentiment: (a.sentiment || '').toLowerCase(),
         });
@@ -626,7 +676,10 @@ app.get('/api/news/general', async (req, res) => {
             if (i < labeledNegative.length)
                 mixed.push(labeledNegative[i]);
         }
-        res.json({ items: mixed });
+        const result = { items: mixed };
+        // Cache the result
+        setCache(cacheKey, result);
+        res.json(result);
     }
     catch (e) {
         res.status(500).json({ error: e?.message || 'general_error' });
@@ -638,81 +691,131 @@ app.get('/api/news/trending', async (req, res) => {
         if (!CRYPTONEWS_API_KEY)
             return res.json({ items: [] });
         const page = Math.max(1, Number(req.query.page || 1));
-        const itemsPerSentiment = 5;
-        // Fetch both positive and negative trending headlines
-        const urlPositive = `https://cryptonews-api.com/api/v1/trending-headlines?page=${page}&sentiment=positive&token=${CRYPTONEWS_API_KEY}`;
-        const urlNegative = `https://cryptonews-api.com/api/v1/trending-headlines?page=${page}&sentiment=negative&token=${CRYPTONEWS_API_KEY}`;
-        const [resPositive, resNegative] = await Promise.all([
-            fetch(urlPositive),
-            fetch(urlNegative)
-        ]);
-        if (!resPositive.ok)
-            throw new Error(`CryptoNews trending positive error ${resPositive.status}`);
-        if (!resNegative.ok)
-            throw new Error(`CryptoNews trending negative error ${resNegative.status}`);
-        const dataPositive = await resPositive.json();
-        const dataNegative = await resNegative.json();
-        const articlesPositive = dataPositive?.data || [];
-        const articlesNegative = dataNegative?.data || [];
-        const mapArticle = (a) => ({
-            id: String(a.id || a.news_id || `trending-${Date.now()}-${Math.random()}`),
-            title: a.headline || a.title || '',
-            source: a.source_name || a.source || 'CryptoNews',
-            url: a.news_url || a.url || `https://cryptonews-api.com/news/${a.news_id}`,
-            publishedAt: a.date || a.published_at || new Date().toISOString(),
-            tickers: Array.isArray(a.tickers) ? a.tickers : (typeof a.ticker === 'string' ? [a.ticker] : []),
-            image_url: a.image_url || a.thumbnail || '',
-            text: a.text || a.description || a.summary || '',
-        });
-        const mappedPositive = articlesPositive.slice(0, itemsPerSentiment).map(mapArticle).filter(m => m.title && m.title.length > 0);
-        const mappedNegative = articlesNegative.slice(0, itemsPerSentiment).map(mapArticle).filter(m => m.title && m.title.length > 0);
-        // Get scores from OpenAI but preserve sentiment
-        const labelsPositive = await classifySentimentOpenAI(mappedPositive.map(r => r.title));
-        const labelsNegative = await classifySentimentOpenAI(mappedNegative.map(r => r.title));
-        const labeledPositive = mappedPositive.map((r, i) => ({ ...r, sentiment: 'bullish', score: labelsPositive[i]?.score ?? 0.3 }));
-        const labeledNegative = mappedNegative.map((r, i) => ({ ...r, sentiment: 'bearish', score: labelsNegative[i]?.score ?? -0.3 }));
-        // Mix them together
-        const mixed = [];
-        const maxLen = Math.max(labeledPositive.length, labeledNegative.length);
-        for (let i = 0; i < maxLen; i++) {
-            if (i < labeledPositive.length)
-                mixed.push(labeledPositive[i]);
-            if (i < labeledNegative.length)
-                mixed.push(labeledNegative[i]);
+        // Check cache first
+        const cacheKey = `trending-news-${page}`;
+        const cached = getCached(cacheKey);
+        if (cached) {
+            return res.json(cached);
         }
-        res.json({ items: mixed });
+        // Fetch trending headlines without sentiment filter to avoid duplicates
+        const url = `https://cryptonews-api.com/api/v1/trending-headlines?page=${page}&token=${CRYPTONEWS_API_KEY}`;
+        const resTrending = await fetch(url);
+        if (!resTrending.ok)
+            throw new Error(`CryptoNews trending error ${resTrending.status}`);
+        const data = await resTrending.json();
+        const articles = data?.data || [];
+        // Helper function to fetch full article details by news_id
+        async function fetchArticleDetails(newsId) {
+            try {
+                const detailUrl = `https://cryptonews-api.com/api/v1/category?section=alltickers&news_id=${newsId}&items=1&page=1&token=${CRYPTONEWS_API_KEY}`;
+                const res = await fetch(detailUrl);
+                if (!res.ok)
+                    return null;
+                const data = await res.json();
+                const articles = data?.data || [];
+                return articles[0] || null;
+            }
+            catch {
+                return null;
+            }
+        }
+        // Remove duplicates by news_id and fetch full details
+        const seenIds = new Set();
+        const uniqueArticles = [];
+        for (const a of articles) {
+            const newsId = a.news_id || a.id;
+            if (!newsId || seenIds.has(newsId))
+                continue;
+            seenIds.add(newsId);
+            uniqueArticles.push(a);
+        }
+        // Fetch full details for unique articles (limit to 20)
+        const promises = uniqueArticles.slice(0, 20).map(async (a) => {
+            const newsId = a.news_id || a.id;
+            if (!newsId)
+                return null;
+            // Fetch full article details
+            const fullArticle = await fetchArticleDetails(newsId);
+            return {
+                id: String(newsId),
+                title: a.headline || a.title || fullArticle?.title || '',
+                source: a.source_name || a.source || fullArticle?.source_name || 'CryptoNews',
+                url: fullArticle?.news_url || a.news_url || a.url || `https://cryptonews-api.com/news/${newsId}`,
+                publishedAt: a.date || a.published_at || fullArticle?.date || new Date().toISOString(),
+                tickers: Array.isArray(fullArticle?.tickers) ? fullArticle.tickers : (Array.isArray(a.tickers) ? a.tickers : []),
+                image_url: fullArticle?.image_url || fullArticle?.thumbnail || a.image_url || a.thumbnail || '',
+                text: fullArticle?.text || fullArticle?.description || a.text || a.description || '',
+            };
+        });
+        const results = await Promise.all(promises);
+        const mapped = results.filter((r) => r !== null && r.title && r.title.length > 0);
+        // Get sentiment from OpenAI
+        const labels = await classifySentimentOpenAI(mapped.map(r => r.title));
+        const labeled = mapped.map((r, i) => ({
+            ...r,
+            sentiment: labels[i]?.sentiment || 'bullish',
+            score: labels[i]?.score ?? 0
+        }));
+        const result = { items: labeled };
+        // Cache the result
+        setCache(cacheKey, result);
+        res.json(result);
     }
     catch (e) {
         console.error('Trending news error:', e?.message || e);
         res.status(500).json({ error: e?.message || 'trending_error' });
     }
 });
-// Sundown Digest endpoint
+// Sundown Digest endpoint - returns digests grouped by date
 app.get('/api/news/sundown', async (req, res) => {
     try {
         if (!CRYPTONEWS_API_KEY)
-            return res.json({ items: [] });
-        const page = Math.max(1, Number(req.query.page || 1));
-        const url = `https://cryptonews-api.com/api/v1/sundown-digest?page=${page}&token=${CRYPTONEWS_API_KEY}`;
-        const resApi = await fetch(url);
-        if (!resApi.ok)
-            throw new Error(`CryptoNews sundown error ${resApi.status}`);
-        const data = await resApi.json();
-        const articles = data?.data || [];
-        const mapped = articles.map((a) => ({
-            id: String(a.id || a.news_id || `sundown-${Date.now()}-${Math.random()}`),
-            title: a.headline || a.title || '',
-            source: a.source_name || a.source || 'CryptoNews',
-            url: a.news_url || a.url || `https://cryptonews-api.com/news/${a.news_id}`,
-            publishedAt: a.date || a.published_at || new Date().toISOString(),
-            tickers: Array.isArray(a.tickers) ? a.tickers : (typeof a.ticker === 'string' ? [a.ticker] : []),
-            image_url: a.image_url || a.thumbnail || '',
-            text: a.text || a.description || a.summary || '',
-        }));
-        const filtered = mapped.filter(m => m.title && m.title.length > 0);
-        const labels = await classifySentimentOpenAI(filtered.map(r => r.title));
-        const labeled = filtered.map((r, i) => ({ ...r, sentiment: labels[i]?.sentiment || 'bullish', score: labels[i]?.score ?? 0 }));
-        res.json({ items: labeled });
+            return res.json({ digests: [] });
+        const daysBack = Math.min(30, Number(req.query.days || 7)); // Default 7 days, max 30
+        // Check cache first
+        const cacheKey = `sundown-digests-${daysBack}`;
+        const cached = getCached(cacheKey);
+        if (cached) {
+            return res.json(cached);
+        }
+        // Fetch multiple pages to get last 7-30 days
+        const promises = [];
+        for (let page = 1; page <= 3; page++) {
+            const url = `https://cryptonews-api.com/api/v1/sundown-digest?page=${page}&token=${CRYPTONEWS_API_KEY}`;
+            promises.push(fetch(url).then(r => r.json()));
+        }
+        const results = await Promise.all(promises);
+        const allDigests = [];
+        for (const data of results) {
+            if (Array.isArray(data?.data)) {
+                allDigests.push(...data.data);
+            }
+        }
+        // Process digests - keep them grouped by date
+        const processedDigests = allDigests
+            .filter(d => d?.headline && d?.text)
+            .slice(0, daysBack)
+            .map(digest => {
+            // Split the digest text into paragraphs
+            const paragraphs = digest.text
+                .split('\n\n')
+                .filter((p) => p.trim().length > 50)
+                .map((p) => p.trim());
+            return {
+                id: String(digest.id),
+                title: digest.headline || `Sundown Digest ${new Date(digest.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`,
+                date: digest.date || new Date().toISOString(),
+                source: 'CryptoNews Sundown',
+                paragraphs: paragraphs,
+                summary: paragraphs.length > 0 ? paragraphs[0].substring(0, 150) + '...' : '',
+                itemCount: paragraphs.length
+            };
+        });
+        console.log(`📰 Sundown digest: processed ${processedDigests.length} digests`);
+        const result = { digests: processedDigests };
+        // Cache the result
+        setCache(cacheKey, result);
+        res.json(result);
     }
     catch (e) {
         console.error('Sundown digest error:', e?.message || e);
