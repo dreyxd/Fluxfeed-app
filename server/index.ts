@@ -735,17 +735,31 @@ app.get('/api/news/sundown', async (req: Request, res: Response) => {
     const resApi = await fetch(url)
     if (!resApi.ok) throw new Error(`CryptoNews sundown error ${resApi.status}`)
     const data = await resApi.json() as any
-    const articles: any[] = data?.data || []
-    const mapped: NewsItem[] = articles.map((a) => ({
+    
+    // Sundown digest returns digest objects, each containing multiple news items
+    const digests: any[] = data?.data || []
+    let allNewsItems: any[] = []
+    
+    // Extract individual news items from each digest
+    for (const digest of digests) {
+      const newsItems = digest?.news || digest?.items || []
+      if (Array.isArray(newsItems)) {
+        allNewsItems = allNewsItems.concat(newsItems)
+      }
+    }
+    
+    // Map the individual news items
+    const mapped: NewsItem[] = allNewsItems.map((a) => ({
       id: String(a.id || a.news_id || `sundown-${Date.now()}-${Math.random()}`),
       title: a.headline || a.title || '',
       source: a.source_name || a.source || 'CryptoNews',
-      url: a.news_url || a.url || `https://cryptonews-api.com/news/${a.news_id}`,
+      url: '', // Sundown digest items don't have URLs
       publishedAt: a.date || a.published_at || new Date().toISOString(),
-      tickers: Array.isArray(a.tickers) ? a.tickers : (typeof a.ticker === 'string' ? [a.ticker] : []),
-      image_url: a.image_url || a.thumbnail || '',
+      tickers: [], // No tickers in sundown digest
+      image_url: '', // No images in sundown digest
       text: a.text || a.description || a.summary || '',
     }))
+    
     const filtered = mapped.filter(m => m.title && m.title.length > 0)
     const labels = await classifySentimentOpenAI(filtered.map(r => r.title))
     const labeled = filtered.map((r, i) => ({ ...r, sentiment: labels[i]?.sentiment || 'bullish', score: labels[i]?.score ?? 0 }))
