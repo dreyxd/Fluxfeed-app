@@ -734,8 +734,18 @@ app.get('/api/news/sundown', async (req: Request, res: Response) => {
       const digests = data.data
       
       for (const item of digests) {
-        // Check if item itself is a news article
-        if (item?.title || item?.headline) {
+        // Skip the digest header itself (it has "Sundown Digest" in the title)
+        const itemTitle = item?.title || item?.headline || ''
+        if (itemTitle.toLowerCase().includes('sundown digest')) {
+          // This is a digest container, extract news from it
+          if (item?.news && Array.isArray(item.news)) {
+            allNewsItems = allNewsItems.concat(item.news)
+          } else if (item?.items && Array.isArray(item.items)) {
+            allNewsItems = allNewsItems.concat(item.items)
+          }
+        }
+        // Check if item itself is a news article (not a digest header)
+        else if (itemTitle && itemTitle.length > 0) {
           allNewsItems.push(item)
         }
         // Check if item contains nested news array
