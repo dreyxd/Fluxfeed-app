@@ -726,17 +726,32 @@ app.get('/api/news/sundown', async (req: Request, res: Response) => {
     if (!resApi.ok) throw new Error(`CryptoNews sundown error ${resApi.status}`)
     const data = await resApi.json() as any
     
-    // Sundown digest returns digest objects, each containing multiple news items
-    const digests: any[] = data?.data || []
+    console.log('Sundown digest raw data:', JSON.stringify(data).substring(0, 500))
+    
+    // Try different possible structures
     let allNewsItems: any[] = []
     
-    // Extract individual news items from each digest
-    for (const digest of digests) {
-      const newsItems = digest?.news || digest?.items || []
-      if (Array.isArray(newsItems)) {
-        allNewsItems = allNewsItems.concat(newsItems)
+    // Check if data is directly an array of news items
+    if (Array.isArray(data?.data)) {
+      const digests = data.data
+      
+      for (const item of digests) {
+        // Check if item itself is a news article
+        if (item?.title || item?.headline) {
+          allNewsItems.push(item)
+        }
+        // Check if item contains nested news array
+        else if (item?.news && Array.isArray(item.news)) {
+          allNewsItems = allNewsItems.concat(item.news)
+        }
+        // Check for items array
+        else if (item?.items && Array.isArray(item.items)) {
+          allNewsItems = allNewsItems.concat(item.items)
+        }
       }
     }
+    
+    console.log(`Sundown digest: extracted ${allNewsItems.length} news items`)
     
     // Map the individual news items
     const mapped: NewsItem[] = allNewsItems.map((a) => ({
@@ -753,6 +768,8 @@ app.get('/api/news/sundown', async (req: Request, res: Response) => {
     const filtered = mapped.filter(m => m.title && m.title.length > 0)
     const labels = await classifySentimentOpenAI(filtered.map(r => r.title))
     const labeled = filtered.map((r, i) => ({ ...r, sentiment: labels[i]?.sentiment || 'bullish', score: labels[i]?.score ?? 0 }))
+    
+    console.log(`Sundown digest: returning ${labeled.length} labeled items`)
     res.json({ items: labeled })
   } catch (e: any) {
     console.error('Sundown digest error:', e?.message || e)
