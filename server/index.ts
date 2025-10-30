@@ -862,6 +862,75 @@ app.get('/api/news/sundown', async (req: Request, res: Response) => {
   }
 })
 
+// AI Chatbot endpoint for landing page
+app.post('/api/chatbot', async (req: Request, res: Response) => {
+  try {
+    const { messages } = req.body
+    
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: 'Messages array is required' })
+    }
+    
+    if (!OPENAI_API_KEY) {
+      return res.status(500).json({ error: 'OpenAI API key not configured' })
+    }
+    
+    // System prompt for the chatbot
+    const SYSTEM_PROMPT = `You are an AI assistant for Fluxfeed, a crypto trading platform that provides AI-powered news sentiment analysis and trading signals. Your role is to help users understand the platform.
+
+Key information about Fluxfeed:
+- Analyzes crypto news in real-time using advanced AI sentiment analysis
+- Provides BUY/SELL/NEUTRAL trading signals with AI rationale
+- Tracks 50+ cryptocurrencies from 1000+ news sources
+- Features: Bullish/Bearish news streams, AI-powered signals, ticker filters, timeframe options
+- Uses STAT algorithm (Sentiment-Triggered Action Threshold) combined with GPT-4 analysis
+- Offers real-time updates every 60 seconds
+- Free tier includes live news feeds, sentiment analysis, and basic signals
+- Premium features coming soon: API access, advanced analytics, custom alerts
+- NOT financial advice - educational tool only
+- Tech stack: TradingView charts, CryptoNews API, OpenAI GPT-4, PostgreSQL
+- Platform stats: <500ms API response, 99.5% uptime, 10,000+ signals generated
+- Available at app.fluxfeed.news
+
+Be helpful, concise, and professional. If asked about topics outside of Fluxfeed, politely redirect to platform-related questions.`
+    
+    // Call OpenAI API
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          ...messages,
+        ],
+        max_tokens: 500,
+        temperature: 0.7,
+      }),
+    })
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      console.error('OpenAI API error:', response.status, errorData)
+      return res.status(response.status).json({ 
+        error: 'OpenAI API error', 
+        details: errorData 
+      })
+    }
+    
+    const data = await response.json()
+    const assistantMessage = data.choices[0].message.content
+    
+    res.json({ message: assistantMessage })
+  } catch (e: any) {
+    console.error('Chatbot error:', e)
+    res.status(500).json({ error: 'Internal server error', details: e?.message })
+  }
+})
+
 // Health
 app.get('/api/health', (_req: Request, res: Response) => {
   res.json({ ok: true, time: new Date().toISOString() })
