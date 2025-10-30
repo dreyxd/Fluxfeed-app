@@ -726,7 +726,7 @@ app.get('/api/news/sundown', async (req: Request, res: Response) => {
     if (!resApi.ok) throw new Error(`CryptoNews sundown error ${resApi.status}`)
     const data = await resApi.json() as any
     
-    console.log('🔍 Sundown digest raw data structure:', JSON.stringify(data).substring(0, 500))
+    console.log('🔍 Sundown digest raw data structure:', JSON.stringify(data, null, 2).substring(0, 1500))
     
     // Try different possible structures
     let allNewsItems: any[] = []
