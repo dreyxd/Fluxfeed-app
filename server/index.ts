@@ -642,7 +642,7 @@ app.get('/api/news/trending', async (req: Request, res: Response) => {
   try {
     if (!CRYPTONEWS_API_KEY) return res.json({ items: [] })
     const page = Math.max(1, Number(req.query.page || 1))
-    const itemsPerSentiment = 5
+    const itemsPerSentiment = 10 // Fetch more initially since we'll filter
     
     // Fetch both positive and negative trending headlines
     const urlPositive = `https://cryptonews-api.com/api/v1/trending-headlines?page=${page}&sentiment=positive&token=${CRYPTONEWS_API_KEY}`
@@ -662,19 +662,47 @@ app.get('/api/news/trending', async (req: Request, res: Response) => {
     const articlesPositive: any[] = dataPositive?.data || []
     const articlesNegative: any[] = dataNegative?.data || []
     
-    const mapArticle = (a: any) => ({
-      id: String(a.id || a.news_id || `trending-${Date.now()}-${Math.random()}`),
-      title: a.headline || a.title || '',
-      source: a.source_name || a.source || 'CryptoNews',
-      url: a.news_url || a.url || `https://cryptonews-api.com/news/${a.news_id}`,
-      publishedAt: a.date || a.published_at || new Date().toISOString(),
-      tickers: Array.isArray(a.tickers) ? a.tickers : (typeof a.ticker === 'string' ? [a.ticker] : []),
-      image_url: a.image_url || a.thumbnail || '',
-      text: a.text || a.description || a.summary || '',
-    })
+    // Helper function to fetch full article details by news_id
+    async function fetchArticleDetails(newsId: string): Promise<any> {
+      try {
+        const url = `https://cryptonews-api.com/api/v1/category?section=alltickers&news_id=${newsId}&items=1&page=1&token=${CRYPTONEWS_API_KEY}`
+        const res = await fetch(url)
+        if (!res.ok) return null
+        const data = await res.json()
+        const articles = data?.data || []
+        return articles[0] || null
+      } catch {
+        return null
+      }
+    }
     
-    const mappedPositive = articlesPositive.slice(0, itemsPerSentiment).map(mapArticle).filter(m => m.title && m.title.length > 0)
-    const mappedNegative = articlesNegative.slice(0, itemsPerSentiment).map(mapArticle).filter(m => m.title && m.title.length > 0)
+    // Fetch full details for all trending articles to get images
+    const fetchDetailsForArticles = async (articles: any[]) => {
+      const promises = articles.slice(0, itemsPerSentiment).map(async (a) => {
+        const newsId = a.news_id || a.id
+        if (!newsId) return null
+        
+        // Fetch full article details
+        const fullArticle = await fetchArticleDetails(newsId)
+        
+        return {
+          id: String(newsId),
+          title: a.headline || a.title || fullArticle?.title || '',
+          source: a.source_name || a.source || fullArticle?.source_name || 'CryptoNews',
+          url: fullArticle?.news_url || a.news_url || a.url || `https://cryptonews-api.com/news/${newsId}`,
+          publishedAt: a.date || a.published_at || fullArticle?.date || new Date().toISOString(),
+          tickers: Array.isArray(fullArticle?.tickers) ? fullArticle.tickers : (Array.isArray(a.tickers) ? a.tickers : []),
+          image_url: fullArticle?.image_url || fullArticle?.thumbnail || a.image_url || a.thumbnail || '',
+          text: fullArticle?.text || fullArticle?.description || a.text || a.description || '',
+        }
+      })
+      
+      const results = await Promise.all(promises)
+      return results.filter(r => r !== null && r.title && r.title.length > 0)
+    }
+    
+    const mappedPositive = await fetchDetailsForArticles(articlesPositive)
+    const mappedNegative = await fetchDetailsForArticles(articlesNegative)
     
     // Get scores from OpenAI but preserve sentiment
     const labelsPositive = await classifySentimentOpenAI(mappedPositive.map(r => r.title))
