@@ -252,12 +252,8 @@ export default function FluxfeedSignals() {
       }
     };
     load();
-    const iv = autoRefresh && analysisStarted ? setInterval(load, refreshMs) : undefined;
-    return () => {
-      cancelled = true;
-      if (iv) clearInterval(iv);
-    };
-  }, [ticker, timeframe, windowSel, autoRefresh, manualTick, refreshMs, selectedAI, analysisStarted]);
+    // No auto-refresh for AI signal - manual refresh only via button
+  }, [ticker, timeframe, windowSel, manualTick, selectedAI, analysisStarted]);
 
   // Filters
   const filtered = useMemo(() => {
