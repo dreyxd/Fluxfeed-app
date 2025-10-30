@@ -152,6 +152,28 @@ export default function FluxfeedSignals() {
     return () => clearTimeout(t);
   }, [showToast]);
 
+  // Reset analysis state when ticker or window changes
+  useEffect(() => {
+    setAnalysisStarted(false);
+    setAiMessages([]);
+    setIsTyping(false);
+    setAnalysisError(null);
+    setSignal({
+      status: "NEUTRAL",
+      confidence: 0,
+      newsScore: 0,
+      count: 0,
+      skew: { bullish: 0, bearish: 0 },
+      drivers: [],
+      health: "Healthy",
+      method: "stat",
+      window: "last24hours",
+      lastUpdated: "",
+      ticker,
+      timeframe,
+    });
+  }, [ticker, windowSel, timeframe]);
+
   // Load news
   useEffect(() => {
     let cancelled = false;
