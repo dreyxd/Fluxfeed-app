@@ -977,4 +977,4 @@ function TypewriterText({ text }: { text: string }) {
 
   return <span className="font-mono">{displayText}<span className="animate-pulse">|</span></span>;
 }
-}
+
