@@ -593,6 +593,8 @@ app.get('/api/news/general', async (req: Request, res: Response) => {
       url: a.news_url || a.url,
       publishedAt: a.date || a.published_at || new Date().toISOString(),
       tickers: Array.isArray(a.tickers) ? a.tickers : (typeof a.ticker === 'string' ? [a.ticker] : []),
+      image_url: a.image_url || a.thumbnail || '',
+      text: a.text || a.description || a.summary || '',
       // Preserve the original CryptoNews sentiment
       cryptoNewsSentiment: (a.sentiment || '').toLowerCase(),
     })
