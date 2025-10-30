@@ -39,8 +39,19 @@ type Signal = {
 const START_NEWS: NewsItem[] = [];
 
 const TICKER_OPTIONS = [
-  "BTC","ETH","BNB","SOL","XRP","ADA","DOGE","AVAX","TRX","DOT",
-  "LINK","MATIC","LTC","BCH","TON","ARB","OP","ATOM","APT"
+  // Top 20 by Market Cap
+  "BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOGE", "AVAX", "TRX", "DOT",
+  "LINK", "MATIC", "LTC", "BCH", "TON", "SHIB", "UNI", "ATOM", "XLM", "HBAR",
+  // DeFi & Layer 2
+  "ARB", "OP", "APT", "SUI", "SEI", "INJ", "RUNE", "FTM", "AAVE", "MKR",
+  // Memecoins
+  "PEPE", "BONK", "FLOKI", "WIF",
+  // Gaming & Metaverse
+  "IMX", "SAND", "MANA", "AXS", "GALA",
+  // AI & Infrastructure
+  "FET", "RNDR", "GRT", "THETA", "FIL",
+  // Other Popular
+  "NEAR", "VET", "ALGO", "ICP", "STX", "KAVA", "EGLD", "FLOW", "ROSE"
 ];
 
 // ----------------------------- Helpers -----------------------------
@@ -78,13 +89,30 @@ function timeframeToInterval(tf: string): string {
 
 function getTvSymbol(ticker: string): string {
   const map: Record<string, string> = {
+    // Top Cryptos
     BTC: "COINBASE:BTCUSD", ETH: "COINBASE:ETHUSD", BNB: "BINANCE:BNBUSDT", SOL: "COINBASE:SOLUSD",
     XRP: "BITSTAMP:XRPUSD", ADA: "COINBASE:ADAUSD", DOGE: "BINANCE:DOGEUSDT", AVAX: "COINBASE:AVAXUSD",
     TRX: "BINANCE:TRXUSDT", DOT: "COINBASE:DOTUSD", LINK: "COINBASE:LINKUSD", MATIC: "COINBASE:MATICUSD",
-    LTC: "COINBASE:LTCUSD", BCH: "COINBASE:BCHUSD", TON: "BINANCE:TONUSDT", ARB: "BINANCE:ARBUSDT",
-    OP: "BINANCE:OPUSDT", ATOM: "COINBASE:ATOMUSD", APT: "BINANCE:APTUSDT",
+    LTC: "COINBASE:LTCUSD", BCH: "COINBASE:BCHUSD", TON: "BINANCE:TONUSDT", SHIB: "BINANCE:SHIBUSDT",
+    UNI: "COINBASE:UNIUSD", ATOM: "COINBASE:ATOMUSD", XLM: "COINBASE:XLMUSD", HBAR: "BINANCE:HBARUSDT",
+    // Layer 2 & DeFi
+    ARB: "BINANCE:ARBUSDT", OP: "BINANCE:OPUSDT", APT: "BINANCE:APTUSDT", SUI: "BINANCE:SUIUSDT",
+    SEI: "BINANCE:SEIUSDT", INJ: "BINANCE:INJUSDT", RUNE: "BINANCE:RUNEUSDT", FTM: "BINANCE:FTMUSDT",
+    AAVE: "COINBASE:AAVEUSD", MKR: "COINBASE:MKRUSD",
+    // Memecoins
+    PEPE: "BINANCE:PEPEUSDT", BONK: "BINANCE:BONKUSDT", FLOKI: "BINANCE:FLOKIUSDT", WIF: "BINANCE:WIFUSDT",
+    // Gaming & Metaverse
+    IMX: "BINANCE:IMXUSDT", SAND: "BINANCE:SANDUSDT", MANA: "BINANCE:MANAUSDT", 
+    AXS: "BINANCE:AXSUSDT", GALA: "BINANCE:GALAUSDT",
+    // AI & Infrastructure
+    FET: "BINANCE:FETUSDT", RNDR: "COINBASE:RNDRUSD", GRT: "COINBASE:GRTUSD", 
+    THETA: "BINANCE:THETAUSDT", FIL: "COINBASE:FILUSD",
+    // Other Popular
+    NEAR: "BINANCE:NEARUSDT", VET: "BINANCE:VETUSDT", ALGO: "COINBASE:ALGOUSD", 
+    ICP: "BINANCE:ICPUSDT", STX: "BINANCE:STXUSDT", KAVA: "BINANCE:KAVAUSDT",
+    EGLD: "BINANCE:EGLDUSDT", FLOW: "BINANCE:FLOWUSDT", ROSE: "BINANCE:ROSEUSDT",
   };
-  return map[ticker] ?? `COINBASE:${ticker}USD`;
+  return map[ticker] ?? `BINANCE:${ticker}USDT`;
 }
 
 function windowToMinutes(w: string) {
