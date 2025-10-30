@@ -10,10 +10,13 @@ const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5-mini';
 const CRYPTONEWS_API_KEY = process.env.CRYPTONEWS_API_KEY || '';
 // Allowed origins for CORS
 const allowedOrigins = [
-    'http://localhost:5173', // Development
+    'http://localhost:5173', // Development - App
+    'http://localhost:5174', // Development - Landing
     'https://fluxfeed.news', // Production main
     'https://www.fluxfeed.news', // Production www
     'https://app.fluxfeed.news', // Production app subdomain
+    'https://fluxfeed-landing.vercel.app', // Vercel landing preview
+    'https://fluxfeed-app.vercel.app', // Vercel app preview
 ];
 const app = express();
 // CORS configuration
@@ -23,9 +26,12 @@ app.use(cors({
         if (!origin)
             return callback(null, true);
         if (allowedOrigins.includes(origin)) {
+            console.log('✅ CORS allowed for origin:', origin);
             callback(null, true);
         }
         else {
+            console.log('❌ CORS blocked for origin:', origin);
+            console.log('📋 Allowed origins:', allowedOrigins);
             callback(new Error('Not allowed by CORS'));
         }
     },
