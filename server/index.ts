@@ -642,31 +642,21 @@ app.get('/api/news/trending', async (req: Request, res: Response) => {
   try {
     if (!CRYPTONEWS_API_KEY) return res.json({ items: [] })
     const page = Math.max(1, Number(req.query.page || 1))
-    const itemsPerSentiment = 10 // Fetch more initially since we'll filter
     
-    // Fetch both positive and negative trending headlines
-    const urlPositive = `https://cryptonews-api.com/api/v1/trending-headlines?page=${page}&sentiment=positive&token=${CRYPTONEWS_API_KEY}`
-    const urlNegative = `https://cryptonews-api.com/api/v1/trending-headlines?page=${page}&sentiment=negative&token=${CRYPTONEWS_API_KEY}`
+    // Fetch trending headlines without sentiment filter to avoid duplicates
+    const url = `https://cryptonews-api.com/api/v1/trending-headlines?page=${page}&token=${CRYPTONEWS_API_KEY}`
+    const resTrending = await fetch(url)
     
-    const [resPositive, resNegative] = await Promise.all([
-      fetch(urlPositive),
-      fetch(urlNegative)
-    ])
+    if (!resTrending.ok) throw new Error(`CryptoNews trending error ${resTrending.status}`)
     
-    if (!resPositive.ok) throw new Error(`CryptoNews trending positive error ${resPositive.status}`)
-    if (!resNegative.ok) throw new Error(`CryptoNews trending negative error ${resNegative.status}`)
-    
-    const dataPositive = await resPositive.json() as any
-    const dataNegative = await resNegative.json() as any
-    
-    const articlesPositive: any[] = dataPositive?.data || []
-    const articlesNegative: any[] = dataNegative?.data || []
+    const data = await resTrending.json() as any
+    const articles: any[] = data?.data || []
     
     // Helper function to fetch full article details by news_id
     async function fetchArticleDetails(newsId: string): Promise<any> {
       try {
-        const url = `https://cryptonews-api.com/api/v1/category?section=alltickers&news_id=${newsId}&items=1&page=1&token=${CRYPTONEWS_API_KEY}`
-        const res = await fetch(url)
+        const detailUrl = `https://cryptonews-api.com/api/v1/category?section=alltickers&news_id=${newsId}&items=1&page=1&token=${CRYPTONEWS_API_KEY}`
+        const res = await fetch(detailUrl)
         if (!res.ok) return null
         const data = await res.json()
         const articles = data?.data || []
@@ -676,50 +666,50 @@ app.get('/api/news/trending', async (req: Request, res: Response) => {
       }
     }
     
-    // Fetch full details for all trending articles to get images
-    const fetchDetailsForArticles = async (articles: any[]) => {
-      const promises = articles.slice(0, itemsPerSentiment).map(async (a) => {
-        const newsId = a.news_id || a.id
-        if (!newsId) return null
-        
-        // Fetch full article details
-        const fullArticle = await fetchArticleDetails(newsId)
-        
-        return {
-          id: String(newsId),
-          title: a.headline || a.title || fullArticle?.title || '',
-          source: a.source_name || a.source || fullArticle?.source_name || 'CryptoNews',
-          url: fullArticle?.news_url || a.news_url || a.url || `https://cryptonews-api.com/news/${newsId}`,
-          publishedAt: a.date || a.published_at || fullArticle?.date || new Date().toISOString(),
-          tickers: Array.isArray(fullArticle?.tickers) ? fullArticle.tickers : (Array.isArray(a.tickers) ? a.tickers : []),
-          image_url: fullArticle?.image_url || fullArticle?.thumbnail || a.image_url || a.thumbnail || '',
-          text: fullArticle?.text || fullArticle?.description || a.text || a.description || '',
-        }
-      })
+    // Remove duplicates by news_id and fetch full details
+    const seenIds = new Set<string>()
+    const uniqueArticles: any[] = []
+    
+    for (const a of articles) {
+      const newsId = a.news_id || a.id
+      if (!newsId || seenIds.has(newsId)) continue
       
-      const results = await Promise.all(promises)
-      return results.filter(r => r !== null && r.title && r.title.length > 0)
+      seenIds.add(newsId)
+      uniqueArticles.push(a)
     }
     
-    const mappedPositive = await fetchDetailsForArticles(articlesPositive)
-    const mappedNegative = await fetchDetailsForArticles(articlesNegative)
+    // Fetch full details for unique articles (limit to 20)
+    const promises = uniqueArticles.slice(0, 20).map(async (a) => {
+      const newsId = a.news_id || a.id
+      if (!newsId) return null
+      
+      // Fetch full article details
+      const fullArticle = await fetchArticleDetails(newsId)
+      
+      return {
+        id: String(newsId),
+        title: a.headline || a.title || fullArticle?.title || '',
+        source: a.source_name || a.source || fullArticle?.source_name || 'CryptoNews',
+        url: fullArticle?.news_url || a.news_url || a.url || `https://cryptonews-api.com/news/${newsId}`,
+        publishedAt: a.date || a.published_at || fullArticle?.date || new Date().toISOString(),
+        tickers: Array.isArray(fullArticle?.tickers) ? fullArticle.tickers : (Array.isArray(a.tickers) ? a.tickers : []),
+        image_url: fullArticle?.image_url || fullArticle?.thumbnail || a.image_url || a.thumbnail || '',
+        text: fullArticle?.text || fullArticle?.description || a.text || a.description || '',
+      }
+    })
     
-    // Get scores from OpenAI but preserve sentiment
-    const labelsPositive = await classifySentimentOpenAI(mappedPositive.map(r => r.title))
-    const labelsNegative = await classifySentimentOpenAI(mappedNegative.map(r => r.title))
+    const results = await Promise.all(promises)
+    const mapped = results.filter((r): r is NonNullable<typeof r> => r !== null && r.title && r.title.length > 0)
     
-    const labeledPositive = mappedPositive.map((r, i) => ({ ...r, sentiment: 'bullish' as const, score: labelsPositive[i]?.score ?? 0.3 }))
-    const labeledNegative = mappedNegative.map((r, i) => ({ ...r, sentiment: 'bearish' as const, score: labelsNegative[i]?.score ?? -0.3 }))
+    // Get sentiment from OpenAI
+    const labels = await classifySentimentOpenAI(mapped.map(r => r.title))
+    const labeled = mapped.map((r, i) => ({ 
+      ...r, 
+      sentiment: labels[i]?.sentiment || 'bullish', 
+      score: labels[i]?.score ?? 0 
+    }))
     
-    // Mix them together
-    const mixed: NewsItem[] = []
-    const maxLen = Math.max(labeledPositive.length, labeledNegative.length)
-    for (let i = 0; i < maxLen; i++) {
-      if (i < labeledPositive.length) mixed.push(labeledPositive[i])
-      if (i < labeledNegative.length) mixed.push(labeledNegative[i])
-    }
-    
-    res.json({ items: mixed })
+    res.json({ items: labeled })
   } catch (e: any) {
     console.error('Trending news error:', e?.message || e)
     res.status(500).json({ error: e?.message || 'trending_error' })
