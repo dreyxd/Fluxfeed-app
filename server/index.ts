@@ -9,6 +9,7 @@ import pool from './db.js'
 
 const PORT = Number(process.env.PORT || 8787)
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || ''
+const OPENAI_CHATBOT_KEY = process.env.OPENAI_CHATBOT_KEY || ''
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5-mini'
 const CRYPTONEWS_API_KEY = process.env.CRYPTONEWS_API_KEY || ''
 
@@ -879,8 +880,8 @@ app.post('/api/chatbot', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Messages array is required' })
     }
     
-    if (!OPENAI_API_KEY) {
-      return res.status(500).json({ error: 'OpenAI API key not configured' })
+    if (!OPENAI_CHATBOT_KEY) {
+      return res.status(500).json({ error: 'OpenAI chatbot API key not configured' })
     }
     
     // System prompt for the chatbot
@@ -907,7 +908,7 @@ Be helpful, concise, and professional. If asked about topics outside of Fluxfeed
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Authorization': `Bearer ${OPENAI_CHATBOT_KEY}`,
       },
       body: JSON.stringify({
         model: OPENAI_MODEL,
