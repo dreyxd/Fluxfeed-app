@@ -9,7 +9,7 @@ import pool from './db.js'
 
 const PORT = Number(process.env.PORT || 8787)
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || ''
-const OPENAI_CHATBOT_KEY = process.env.OPENAI_CHATBOT_KEY || ''
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || ''
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-5-mini'
 const CRYPTONEWS_API_KEY = process.env.CRYPTONEWS_API_KEY || ''
 
@@ -871,7 +871,82 @@ app.get('/api/news/sundown', async (req: Request, res: Response) => {
   }
 })
 
-// AI Chatbot endpoint for landing page
+// ----------------------------- DeepSeek Chatbot with Caching -----------------------------
+interface ChatMessage {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+// Cache for chatbot responses
+const chatbotCache = new Map<string, { response: string; timestamp: number }>()
+const CHATBOT_CACHE_TTL = 30 * 60 * 1000 // 30 minutes
+
+function getChatCacheKey(messages: ChatMessage[]): string {
+  return JSON.stringify(messages.map(m => ({ role: m.role, content: m.content })))
+}
+
+// System prompt for DeepSeek chatbot
+const CHATBOT_SYSTEM_PROMPT = `You are an AI assistant for Fluxfeed, a crypto trading platform that provides AI-powered news sentiment analysis and trading signals. Your role is to help users understand the platform.
+
+Key information about Fluxfeed:
+
+PLATFORM OVERVIEW:
+- Real-time crypto news analysis using advanced AI sentiment analysis
+- Provides BUY/SELL/NEUTRAL trading signals with detailed AI rationale
+- Tracks 50+ cryptocurrencies from 1000+ trusted news sources
+- Platform URL: app.fluxfeed.news
+
+CORE FEATURES:
+- Bullish/Bearish news streams with live sentiment scoring
+- AI-powered trading signals updated every 60 seconds
+- Ticker filters for personalized crypto tracking
+- Multiple timeframe options (15m, 1h, 4h, 1d)
+- TradingView chart integration for technical analysis
+- Real-time market sentiment indicators
+
+TECHNOLOGY:
+- STAT Algorithm: Sentiment-Triggered Action Threshold for signal generation
+- AI Models: GPT-4 for sentiment analysis and signal rationale
+- Data Sources: CryptoNews API with 1000+ sources
+- Database: PostgreSQL for reliable data storage
+- Performance: <500ms API response time, 99.5% uptime
+
+STATISTICS:
+- Over 10,000 signals generated
+- 50+ cryptocurrencies tracked
+- Real-time updates every 60 seconds
+- 99.5% platform uptime
+
+FREE TIER INCLUDES:
+- Live news feeds (bullish & bearish)
+- Basic sentiment analysis
+- Trading signals with AI rationale
+- TradingView chart access
+- Ticker filtering
+
+PREMIUM FEATURES (Coming Soon):
+- API access for developers
+- Advanced analytics dashboard
+- Custom alert notifications
+- Historical signal performance
+- Portfolio tracking
+
+IMPORTANT DISCLAIMERS:
+- NOT financial advice - educational tool only
+- All signals are AI-generated predictions
+- Users should do their own research (DYOR)
+- Past performance doesn't guarantee future results
+
+RESPONSE GUIDELINES:
+- Be helpful, concise, and professional
+- Explain features clearly with examples when helpful
+- If asked about topics outside Fluxfeed, politely redirect to platform-related questions
+- Never give specific trading advice or price predictions
+- Always remind users this is an educational tool, not financial advice
+
+Answer user questions accurately based on this information. Keep responses clear and informative.`
+
+// AI Chatbot endpoint for landing page (DeepSeek)
 app.post('/api/chatbot', async (req: Request, res: Response) => {
   try {
     const { messages } = req.body
@@ -880,65 +955,79 @@ app.post('/api/chatbot', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Messages array is required' })
     }
     
-    if (!OPENAI_CHATBOT_KEY) {
-      return res.status(500).json({ error: 'OpenAI chatbot API key not configured' })
+    if (!DEEPSEEK_API_KEY) {
+      return res.status(500).json({ error: 'DeepSeek API key not configured' })
     }
     
-    // System prompt for the chatbot
-    const SYSTEM_PROMPT = `You are an AI assistant for Fluxfeed, a crypto trading platform that provides AI-powered news sentiment analysis and trading signals. Your role is to help users understand the platform.
-
-Key information about Fluxfeed:
-- Analyzes crypto news in real-time using advanced AI sentiment analysis
-- Provides BUY/SELL/NEUTRAL trading signals with AI rationale
-- Tracks 50+ cryptocurrencies from 1000+ news sources
-- Features: Bullish/Bearish news streams, AI-powered signals, ticker filters, timeframe options
-- Uses STAT algorithm (Sentiment-Triggered Action Threshold) combined with GPT-4 analysis
-- Offers real-time updates every 60 seconds
-- Free tier includes live news feeds, sentiment analysis, and basic signals
-- Premium features coming soon: API access, advanced analytics, custom alerts
-- NOT financial advice - educational tool only
-- Tech stack: TradingView charts, CryptoNews API, OpenAI GPT-4, PostgreSQL
-- Platform stats: <500ms API response, 99.5% uptime, 10,000+ signals generated
-- Available at app.fluxfeed.news
-
-Be helpful, concise, and professional. If asked about topics outside of Fluxfeed, politely redirect to platform-related questions.`
+    // Prepare messages with system prompt
+    const fullMessages: ChatMessage[] = [
+      { role: 'system', content: CHATBOT_SYSTEM_PROMPT },
+      ...messages,
+    ]
     
-    // Call OpenAI API
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    // Check cache first
+    const cacheKey = getChatCacheKey(fullMessages)
+    const cached = chatbotCache.get(cacheKey)
+    if (cached && Date.now() - cached.timestamp < CHATBOT_CACHE_TTL) {
+      console.log('💬 Chatbot cache HIT')
+      return res.json({ message: cached.response, cached: true })
+    }
+    
+    console.log('🤖 Calling DeepSeek API for chatbot...')
+    
+    // Call DeepSeek API
+    const response = await fetch('https://api.deepseek.com/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_CHATBOT_KEY}`,
+        'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
       },
       body: JSON.stringify({
-        model: OPENAI_MODEL,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          ...messages,
-        ],
-        max_tokens: 500,
+        model: 'deepseek-chat',
+        messages: fullMessages,
+        max_tokens: 800,
         temperature: 0.7,
+        stream: false,
       }),
     })
     
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
-      console.error('OpenAI API error:', response.status, errorData)
+      console.error('DeepSeek API error:', response.status, errorData)
       return res.status(response.status).json({ 
-        error: 'OpenAI API error', 
+        error: 'DeepSeek API error', 
         details: errorData 
       })
     }
     
     const data = await response.json()
-    const assistantMessage = data.choices[0].message.content
+    const assistantMessage = data.choices?.[0]?.message?.content || 'Sorry, I could not generate a response.'
     
-    res.json({ message: assistantMessage })
+    // Cache the response
+    chatbotCache.set(cacheKey, { response: assistantMessage, timestamp: Date.now() })
+    console.log('💾 Chatbot response cached')
+    
+    res.json({ message: assistantMessage, cached: false })
   } catch (e: any) {
     console.error('Chatbot error:', e)
     res.status(500).json({ error: 'Internal server error', details: e?.message })
   }
 })
+
+// Clean up expired chatbot cache entries every 15 minutes
+setInterval(() => {
+  const now = Date.now()
+  let cleaned = 0
+  for (const [key, entry] of chatbotCache.entries()) {
+    if (now - entry.timestamp >= CHATBOT_CACHE_TTL) {
+      chatbotCache.delete(key)
+      cleaned++
+    }
+  }
+  if (cleaned > 0) {
+    console.log(`🧹 Chatbot cache cleanup: removed ${cleaned} expired entries`)
+  }
+}, 15 * 60 * 1000)
 
 // Health
 app.get('/api/health', (_req: Request, res: Response) => {
